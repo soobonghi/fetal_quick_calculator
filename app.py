@@ -4,19 +4,35 @@ import streamlit as st
 from calculations import fl_foot, fl_ac, tc_ac, ratio, plas_index, gose_ratio
 
 st.set_page_config(page_title="Fetal Quick Calculator", page_icon="📐", layout="wide")
-
 st.markdown("""<style>
 .block-container {max-width: 1080px; padding-top: 2rem}
 [data-testid="stMetricValue"] {font-size: 1.65rem}
 </style>""", unsafe_allow_html=True)
 
-st.title("Fetal Quick Calculator")
-st.caption("태아 초음파 검사자를 위한 측정 비율 계산 및 ViewPoint 기록 초안 · Prototype v2")
+# Widget values must be cleared before the widgets are rendered.
+INPUT_KEYS = (
+    "rv", "lv", "ra", "la", "tv", "mv", "pv", "av",
+    "plas_dist", "dao", "g_ra", "g_arv", "g_frv", "g_la", "g_lv",
+    "fl", "foot", "ac", "tc",
+)
+
+
+def reset_inputs():
+    for key in INPUT_KEYS:
+        st.session_state[key] = ""
+
+
+head, reset_col = st.columns([5, 1.2], vertical_alignment="bottom")
+with head:
+    st.title("Fetal Quick Calculator")
+    st.caption("태아 초음파 검사자를 위한 측정 비율 계산 및 ViewPoint 기록 초안 · Prototype v3")
+with reset_col:
+    st.button("↺ 전체 수치 리셋", on_click=reset_inputs, use_container_width=True, help="입력한 모든 측정값을 지웁니다.")
+
 st.info("임상 검증 전 시제품입니다. 환자 식별정보를 입력하지 마세요. 결과는 검사자가 측정 기준·단위·참고문헌을 확인한 후 사용해야 합니다.")
 
 
 def num(label: str, key: str, unit: str = "mm", help_text: str | None = None):
-    """Optional positive numeric input; empty means not measured."""
     raw = st.text_input(f"{label} ({unit})", key=key, placeholder="측정값 입력", help=help_text)
     if not raw.strip():
         return None
@@ -45,9 +61,69 @@ def pair_result(label, a, b, percent=False):
 
 
 lines = []
-tabs = st.tabs(["🦴 근골격계·흉곽", "🫀 심방·심실", "🫀 판막·지표", "📚 참고치 (추가 예정)"])
+tabs = st.tabs(["🫀 심장", "🦴 근골격계·흉곽", "📚 참고치 (추가 예정)"])
 
 with tabs[0]:
+    st.subheader("심장 계산기")
+    st.markdown("**심실·심방 비율**")
+    st.caption("같은 비율의 분자·분모는 반드시 동일한 측정 방식과 단위를 사용하세요. 아래 기본 입력은 길이(mm)입니다.")
+    c1, c2 = st.columns(2)
+    with c1:
+        rv = num("RV dimension", "rv")
+        ra = num("RA dimension", "ra")
+    with c2:
+        lv = num("LV dimension", "lv")
+        la = num("LA dimension", "la")
+    c1, c2 = st.columns(2)
+    with c1:
+        pair_result("RV/LV", rv, lv)
+    with c2:
+        pair_result("RA/LA", ra, la)
+
+    st.divider()
+    st.markdown("**판막 비율**")
+    st.caption("판막 직경은 동일한 시기·측정 기준의 mm 값으로 입력하세요.")
+    c1, c2 = st.columns(2)
+    with c1:
+        tv = num("TV annulus", "tv")
+        pv = num("PV annulus", "pv")
+    with c2:
+        mv = num("MV annulus", "mv")
+        av = num("AV annulus", "av")
+    c1, c2 = st.columns(2)
+    with c1:
+        pair_result("TV/MV", tv, mv)
+    with c2:
+        pair_result("PV/AV", pv, av)
+
+    st.divider()
+    st.markdown("**PLAS index · TAPVR 관련**")
+    st.caption("LA 후벽과 descending aorta 사이 거리 / descending aorta 직경. 동일한 영상면과 측정 기준 확인이 필요합니다.")
+    c1, c2 = st.columns(2)
+    with c1:
+        plas_dist = num("Post-LA distance", "plas_dist")
+    with c2:
+        dao = num("Descending aorta diameter", "dao")
+    if plas_dist is not None and dao is not None:
+        result("PLAS index", plas_index(plas_dist, dao))
+
+    st.divider()
+    st.markdown("**GOSE / Celermajer area ratio · Ebstein 관련**")
+    st.caption("(RA area + atrialized RV area) / (functional RV area + LA area + LV area). 면적은 cm²로 통일합니다. 임상 등급 판정은 제공하지 않습니다.")
+    c1, c2 = st.columns(2)
+    with c1:
+        ra_area = num("RA area", "g_ra", "cm²")
+        arv_area = num("Atrialized RV area", "g_arv", "cm²")
+        frv_area = num("Functional RV area", "g_frv", "cm²")
+    with c2:
+        la_area = num("LA area", "g_la", "cm²")
+        lv_area = num("LV area", "g_lv", "cm²")
+    vals = [ra_area, arv_area, frv_area, la_area, lv_area]
+    if all(v is not None for v in vals):
+        result("GOSE area ratio", gose_ratio(*vals))
+    st.caption("※ GOSE 측정 범위 및 기관별 기록 방식은 담당 교수·원내 프로토콜과 최종 대조해 주세요.")
+
+with tabs[1]:
     st.subheader("근골격계 및 흉곽")
     st.caption("길이 및 둘레는 모두 mm로 입력합니다. Ratio는 무단위입니다.")
     c1, c2 = st.columns(2)
@@ -69,66 +145,7 @@ with tabs[0]:
         if tc is not None and ac is not None:
             result("TC/AC", tc_ac(tc, ac))
 
-with tabs[1]:
-    st.subheader("심실 및 심방 비율")
-    st.caption("같은 비율의 분자·분모는 반드시 동일한 측정 방식과 단위를 사용하세요. 아래 기본 입력은 길이(mm)입니다.")
-    c1, c2 = st.columns(2)
-    with c1:
-        rv = num("RV dimension", "rv")
-        ra = num("RA dimension", "ra")
-    with c2:
-        lv = num("LV dimension", "lv")
-        la = num("LA dimension", "la")
-    c1, c2 = st.columns(2)
-    with c1:
-        pair_result("RV/LV", rv, lv)
-    with c2:
-        pair_result("RA/LA", ra, la)
-
 with tabs[2]:
-    st.subheader("판막 비율")
-    st.caption("판막 직경은 동일한 시기·측정 기준의 mm 값으로 입력하세요.")
-    c1, c2 = st.columns(2)
-    with c1:
-        tv = num("TV annulus", "tv")
-        pv = num("PV annulus", "pv")
-    with c2:
-        mv = num("MV annulus", "mv")
-        av = num("AV annulus", "av")
-    c1, c2 = st.columns(2)
-    with c1:
-        pair_result("TV/MV", tv, mv)
-    with c2:
-        pair_result("PV/AV", pv, av)
-
-    st.divider()
-    st.subheader("PLAS index · TAPVR 관련")
-    st.caption("LA 후벽과 descending aorta 사이 거리 / descending aorta 직경. 동일한 영상면과 측정 기준 확인이 필요합니다.")
-    c1, c2 = st.columns(2)
-    with c1:
-        plas_dist = num("Post-LA distance", "plas_dist")
-    with c2:
-        dao = num("Descending aorta diameter", "dao")
-    if plas_dist is not None and dao is not None:
-        result("PLAS index", plas_index(plas_dist, dao))
-
-    st.divider()
-    st.subheader("GOSE / Celermajer area ratio · Ebstein 관련")
-    st.caption("(RA area + atrialized RV area) / (functional RV area + LA area + LV area). 면적은 cm²로 통일합니다. 임상 등급 판정은 제공하지 않습니다.")
-    c1, c2 = st.columns(2)
-    with c1:
-        ra_area = num("RA area", "g_ra", "cm²")
-        arv_area = num("Atrialized RV area", "g_arv", "cm²")
-        frv_area = num("Functional RV area", "g_frv", "cm²")
-    with c2:
-        la_area = num("LA area", "g_la", "cm²")
-        lv_area = num("LV area", "g_lv", "cm²")
-    vals = [ra_area, arv_area, frv_area, la_area, lv_area]
-    if all(v is not None for v in vals):
-        result("GOSE area ratio", gose_ratio(*vals))
-    st.caption("※ GOSE 측정 범위 및 기관별 기록 방식은 담당 교수·원내 프로토콜과 최종 대조해 주세요.")
-
-with tabs[3]:
     st.subheader("참고치 계산 · 병원 자료 수령 후 구현")
     st.write("아래 세 항목은 메뉴를 미리 준비했습니다. 현재는 백분위나 정상·이상 판정을 계산하지 않습니다.")
     for title, desc in [
