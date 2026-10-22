@@ -4,11 +4,6 @@ import streamlit as st
 
 
 # ===== Bundled calculations.py =====
-"""Arithmetic for fetal ultrasound quick-reference calculations.
-
-No reference percentiles, diagnostic cutoffs, or clinical interpretation are
-included. Inputs for each ratio must use the same units and measurement type.
-"""
 import math
 
 
@@ -49,7 +44,6 @@ def gose_ratio(ra_area_cm2: float, atrialized_rv_area_cm2: float,
 
 
 # ===== Bundled reference_calc.py =====
-"""Safe table lookup/interpolation for gestational-age-specific published reference knots."""
 import math
 
 
@@ -125,10 +119,6 @@ def median_equivalent_ga(weight_g, table):
 
 
 # ===== Bundled reference_data.py =====
-"""Published tabulated reference points transcribed from user-provided clinical reference photos.
-Values are reference table knots, not patient data. Validate against original articles
-before clinical deployment. GA = completed weeks, with linear interpolation for days.
-"""
 
 # Singleton EFW (g): NICHD Fetal Growth Studies, Asian cohort; P3, P5, P10, P50, P90, P95, P97.
 # Source photo contains an apparent typographic error at GA 21 P97 ('380' < P95 467);
@@ -222,11 +212,6 @@ REFERENCE_INFO = {
 
 
 # ===== Bundled reference_extra.py =====
-"""Gestational age tables transcribed from user-supplied reference photographs.
-Values for full completed weeks. In-between days are linearly interpolated in app.
-Ranges are NOT interchangeable: CI for a mean != prediction interval for a fetus.
-Confirm each source and data usage rights before publishing the tables.
-"""
 # UOG 2003;21:161-164: GA: [mean descending colon, CI lower, CI upper, mean rectum, CI lower, CI upper], mm.
 # 19-20 weeks are a single reported band, used unchanged for weeks 19 and 20.
 DESCENDING_RECTUM = {
@@ -328,7 +313,7 @@ st.markdown('<style>.block-container{max-width:1100px;padding-top:1.5rem}</style
 
 INPUT_KEYS = ('rv','lv','ra','la','plas_dist','dao',
               'g_ra','g_arv','g_frv','g_la','g_lv','card_circ','thor_circ','card_area','thor_area','fl','foot_rt','foot_lt','ac','tc',
-              'kidney','efw','efw_a','efw_b','afi','thymus',
+              'kidney_rt','kidney_lt','efw','efw_a','efw_b','afi','thymus',
               'descending_colon','rectum','small_bowel','colon','stomach',
               'nasal_bone','ear_rt','ear_lt')
 
@@ -361,7 +346,7 @@ def show_ratio(name, a, b, show_percent=False):
 c1,c2=st.columns([5,1.5],vertical_alignment='bottom')
 with c1:
     st.title('Fetal Quick Calculator')
-    st.caption('심장 · 근골격계 · 임신 주수별 참고치')
+    st.caption('심장 · 근골격계 · 소화·비뇨기계 · 얼굴 계측 · 성장·양수')
 with c2:
     st.button('↺ 전체 수치 리셋',on_click=reset_inputs,use_container_width=True)
 
@@ -387,7 +372,7 @@ def show_band(label, value, row, ps, unit):
     st.metric(label, band)
 
 
-heart, musculo, digestive, face, refs=st.tabs(['🫀 심장','🦴 근골격계·흉곽','🩺 소화기계','👶 얼굴 계측','📚 참고치'])
+heart, musculo, digestive, face, refs=st.tabs(['🫀 심장','🦴 근골격계·흉곽','🩺 소화·비뇨기계','👶 얼굴 계측','📈 태아 성장·양수'])
 with heart:
     st.subheader('심장 계산기')
     st.markdown('**심실 비율 (RV/LV)**')
@@ -430,7 +415,7 @@ with heart:
         with c1: card_area=number('Cardiac area','card_area','cm²')
         with c2: thor_area=number('Thoracic area','thor_area','cm²')
         if card_area is not None and thor_area is not None:
-            st.code(f'CTAR: {ratio(card_area,thor_area):.2f} ({ratio(card_area,thor_area)*100:.1f}%)',language=None)
+            st.code(f'CTAR: {ratio(card_area,thor_area):.2f}',language=None)
     st.divider()
     st.markdown('**GOSE Score (Ebstein 관련)**')
     st.caption('면적 단위 cm². (RA + atrialized RV) / (functional RV + LA + LV)')
@@ -442,7 +427,7 @@ with heart:
     if all(v is not None for v in (gra,garv,gfrv,gla,glv)):
         val=gose_ratio(gra,garv,gfrv,gla,glv)
         grade=1 if val<.5 else 2 if val<1 else 3 if val<1.5 else 4
-        st.code(f'GOSE Grade: {grade}',language=None)
+        st.code(f'GOSE Score: {val:.2f} (Grade {grade})',language=None)
     st.divider()
     st.markdown('**PLAS Index (TAPVR 관련)**')
     c1,c2=st.columns(2)
@@ -450,7 +435,29 @@ with heart:
     with c2: dao=number('Descending aorta diameter','dao')
     if dist is not None and dao is not None:
         val=plas_index(dist,dao)
-        st.code(f'PLAS Index: {val:.2f}',language=None)
+        st.code(f'PLAS Index: {val:.2f} (Ref. normal mean: 0.62 ± 0.19; TAPVC screening cutoff: ≥1.27)',language=None)
+        st.caption('PLAS index는 TAPVC 의심을 위한 보조 지표이며 단독 진단 기준이 아닙니다.')
+
+    st.divider()
+    st.subheader('Thymus 참고치')
+    with st.container(border=True):
+        st.markdown('**Thymic diameter (mm)**')
+        thymus=number('Thymic diameter','thymus')
+        row=get_ref(THYMUS_CM)
+        if row is None:
+            st.caption('참고치 범위: 19–38주 (마지막 주는 0일)')
+        else:
+            mean,lower,upper=[v*10 for v in row]
+            if thymus is not None:
+                status=('Below lower limit' if thymus < lower else 'Above upper limit' if thymus > upper else 'Within range')
+                st.metric('95% reference range',status)
+            text=f'Ref. {ga_ref} lower limit of 95% reference range: {lower:.1f} mm'
+            if thymus is not None:
+                st.code(f'Thymic diameter: {thymus:g} mm ({text})',language=None)
+            else:
+                st.caption(text)
+            st.caption(f'Mean: {mean:.1f} mm | Upper limit: {upper:.1f} mm')
+            ref_caption('THYMUS_CM')
 
 with musculo:
     st.subheader('근골격계·흉곽')
@@ -533,13 +540,13 @@ with digestive:
     st.subheader('소화기계 계측')
     st.caption('단위: mm. 95% CI는 평균에 대한 신뢰구간이며 개별 태아의 정상범위가 아닙니다.')
     with st.container(border=True):
-        st.markdown('**Stomach axial diameter**')
-        stomach=number('Stomach axial diameter','stomach')
+        st.markdown('**Stomach**')
+        stomach=number('Stomach','stomach')
         row=get_ref(STOMACH)
         if row is None:
             st.caption('참고치 범위: 14–40주. 공통 임신 주수를 입력해 주세요.')
         else:
-            reference_line('Stomach axial diameter',stomach,f'Ref. {ga_ref} 5th percentile: {row[2]:.1f} mm; 95th percentile: {row[8]:.1f} mm')
+            reference_line('Stomach',stomach,f'Ref. {ga_ref} 5th percentile: {row[2]:.1f} mm; 95th percentile: {row[8]:.1f} mm')
             extra_source('STOMACH')
     with st.container(border=True):
         st.markdown('**Small bowel diameter**')
@@ -592,16 +599,33 @@ with digestive:
         if row is not None:
             extra_source('DESCENDING_RECTUM')
 
+    st.divider()
+    st.subheader('비뇨기계 계측')
+    with st.container(border=True):
+        st.markdown('**Kidney length (mm)**')
+        c1,c2=st.columns(2)
+        with c1: kidney_rt=number('Kidney Rt','kidney_rt')
+        with c2: kidney_lt=number('Kidney Lt','kidney_lt')
+        row=get_ref(KIDNEY_MM)
+        if row is None:
+            st.caption('참고치 범위: 16–41주 (마지막 주는 0일)')
+        else:
+            p5,p50,p95=row
+            reference_text=f'Ref. {ga_ref} 5th percentile: {p5:.1f} mm; 95th percentile: {p95:.1f} mm'
+            pair_reference_line('Kidney length',kidney_rt,kidney_lt,reference_text)
+            st.caption(f'P50: {p50:.1f} mm')
+            ref_caption('KIDNEY_MM')
+
 with face:
     st.subheader('얼굴 계측')
     with st.container(border=True):
-        st.markdown('**Nasal bone length**')
-        nasal_bone=number('Nasal bone length','nasal_bone')
+        st.markdown('**NB (Nasal bone length)**')
+        nasal_bone=number('NB','nasal_bone')
         row=get_ref(NASAL_BONE)
         if row is None:
             st.caption('참고치 범위: 11–40주.')
         else:
-            reference_line('Nasal bone length',nasal_bone,f'Ref. {ga_ref} 5th percentile: {row[1]:.1f} mm')
+            reference_line('NB',nasal_bone,f'Ref. {ga_ref} 5th percentile: {row[1]:.1f} mm')
             extra_source('NASAL_BONE')
     with st.container(border=True):
         st.markdown('**Ear length**')
@@ -616,7 +640,7 @@ with face:
             extra_source('EAR_LENGTH')
 
 with refs:
-    st.subheader('임신 주수별 참고치')
+    st.subheader('태아 성장·양수 참고치')
     st.caption('임신 주수(Weeks, Days)를 입력하면 해당 주수의 참고치를 조회합니다. 주+일은 인접 주수 간 선형보간한 값입니다.')
     with st.container(border=True):
         st.markdown('**EFW (g)**')
@@ -670,22 +694,6 @@ with refs:
             if not group.startswith('Singleton'):
                 st.caption('DC/MC 자료는 초음파 추정체중 성장곡선이 아닌 쌍태아 출생체중 참고표입니다.')
     with st.container(border=True):
-        st.markdown('**Kidney length (mm)**')
-        kidney=number('Kidney length','kidney')
-        row=get_ref(KIDNEY_MM)
-        if row is None:
-            st.caption('참고치 범위: 16–41주 (마지막 주는 0일)')
-        else:
-            p5,p50,p95=row
-            show_band('Kidney length percentile interval',kidney,row,[5,50,95],'mm')
-            text=f'Ref. {ga_ref} 5th percentile: {p5:.1f} mm\nRef. {ga_ref} 95th percentile: {p95:.1f} mm'
-            if kidney is not None:
-                st.code(f'Kidney length: {kidney:g} mm (Ref. {ga_ref} 5th percentile: {p5:.1f} mm; 95th percentile: {p95:.1f} mm)',language=None)
-            else:
-                st.caption(text.replace(chr(10),' | '))
-            st.caption(f'P50: {p50:.1f} mm')
-            ref_caption('KIDNEY_MM')
-    with st.container(border=True):
         st.markdown('**AFI (mm)**')
         afi=number('AFI','afi')
         row=get_ref(AFI)
@@ -697,22 +705,3 @@ with refs:
                 st.code(f'AFI: {afi:g} mm (Ref. {ga_ref} 5th percentile: {row[1]:.1f} mm; 95th percentile: {row[3]:.1f} mm)',language=None)
             st.caption(' | '.join(f'P{pct}: {val:.1f} mm' for pct,val in zip([3,5,50,95,97],row)))
             ref_caption('AFI')
-    with st.container(border=True):
-        st.markdown('**Thymic diameter (mm)**')
-        thymus=number('Thymic diameter','thymus')
-        row=get_ref(THYMUS_CM)
-        if row is None:
-            st.caption('참고치 범위: 19–38주 (마지막 주는 0일)')
-        else:
-            mean,lower,upper=[v*10 for v in row]
-            if thymus is not None:
-                status=('Below lower limit' if thymus < lower else 'Above upper limit' if thymus > upper else 'Within range')
-                st.metric('95% reference range',status)
-            text=f'Ref. {ga_ref} lower limit of 95% reference range: {lower:.1f} mm'
-            if thymus is not None:
-                st.code(f'Thymic diameter: {thymus:g} mm ({text})',language=None)
-            else:
-                st.caption(text)
-            st.caption(f'Mean: {mean:.1f} mm | Upper limit: {upper:.1f} mm')
-            ref_caption('THYMUS_CM')
-
