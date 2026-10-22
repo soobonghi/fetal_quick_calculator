@@ -19,3 +19,7 @@ v15: Thymic diameter moved to Heart; Kidney length moved to Digestive & Urinary;
 - PLAS: show normal mean ± SD (0.62 ± 0.19) and separate TAPVC screening cutoff ≥1.27. The former is not a reference interval; the latter is not a stand-alone diagnosis. Sources: Kawazu et al., Prenat Diagn 2019 (PMID 30615216); ISUOG VISUOG TAPVR.
 - Stomach: shorter label in copyable result.
 - Kidney: separate Rt/Lt inputs, one copyable combined line with GA-specific P5/P95.
+
+## v18 changes
+- Omit EFW equivalent gestational age when outside the supported P50 table range, instead of printing size unavailable.
+- AFI copyable result displays only the nearest published P3/P5/P50/P95/P97 reference knot, not both P5 and P95. This is the closest table value, not an estimated exact percentile.

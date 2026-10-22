@@ -663,14 +663,14 @@ with refs:
             band=percentile_band(efw,ps,row)
             closest=nearest_reference_percentile(efw,ps,row)
             size=median_equivalent_ga(efw,t)
-            size_text=f'{size[0]}w{size[1]}d size' if size is not None else 'size unavailable'
+            size_text=f', {size[0]}w{size[1]}d size' if size is not None else ''
             if closest is not None:
                 pct,ref_g=closest
                 suffix='rd' if pct==3 else 'th'
-                st.code(f'{label}: {efw:g} g, {size_text} (Ref. {ga_ref} {pct}{suffix} percentile: {ref_g:.0f} g)',language=None)
+                st.code(f'{label}: {efw:g} g{size_text} (Ref. {ga_ref} {pct}{suffix} percentile: {ref_g:.0f} g)',language=None)
                 st.caption(f'Percentile interval: {band} · size는 P50 기준 추정 주수')
             else:
-                st.code(f'{label}: {efw:g} g, {size_text} (Ref. unavailable)',language=None)
+                st.code(f'{label}: {efw:g} g{size_text} (Ref. unavailable)',language=None)
 
         if group.startswith('Singleton'):
             efw=number('EFW','efw','g')
@@ -702,6 +702,11 @@ with refs:
         else:
             show_band('AFI percentile interval',afi,row,[3,5,50,95,97],'mm')
             if afi is not None:
-                st.code(f'AFI: {afi:g} mm (Ref. {ga_ref} 5th percentile: {row[1]:.1f} mm; 95th percentile: {row[3]:.1f} mm)',language=None)
+                nearest=nearest_reference_percentile(afi,[3,5,50,95,97],row)
+                if nearest is not None:
+                    pct,ref_mm=nearest
+                    st.code(f'AFI: {afi:g} mm (Ref. {ga_ref} {pct}th percentile: {ref_mm:.1f} mm)',language=None)
+                else:
+                    st.code(f'AFI: {afi:g} mm (Ref. unavailable)',language=None)
             st.caption(' | '.join(f'P{pct}: {val:.1f} mm' for pct,val in zip([3,5,50,95,97],row)))
             ref_caption('AFI')
