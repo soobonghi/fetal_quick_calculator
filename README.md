@@ -1,29 +1,31 @@
-# Fetal Quick Calculator v6
+# Fetal Quick Calculator v10
 
-태아 초음파 계산기(Streamlit). 측정값은 기본적으로 비어 있으며, 임신 주수는 Weeks/Days로 입력합니다.
+## 변경사항
+- 심방 비율을 **LA/RA = LA ÷ RA**로 수정했습니다.
+- 각 측정값 아래에만 기록용 결과를 표시하며 하단 전체 ViewPoint 결과 모음은 제거했습니다.
+- EFW: `EFW: 634 g, 24w0d size (Ref. 24wks 50th percentile: 634 g)` 형식. 수치는 예시이며 실제 계산값에 따라 달라집니다.
+  - `size`는 선택한 Singleton/DC/MC 참고표의 P50 값을 역보간한 **추정 주수**입니다.
+  - `Ref.`는 측정값과 가장 가까운 **표에 실제 제공된 백분위 지점**입니다. 정확한 개인별 percentile을 의미하지 않으므로 percentile interval도 표시합니다.
+  - DC/MC 참고표는 **출생체중** 자료로, 초음파 EFW 성장곡선과 다릅니다.
+- 근골격계 비율에는 정상범위 대신 문헌에 기재된 이상 참고 기준을 표시합니다: FL/Foot <0.90, FL/AC <0.16, TC/AC <0.60. 이 수치만으로 골격이형성증이나 예후를 판정할 수 없습니다.
 
-## v6 변경 사항
-- 심장 탭: GOSE Grade를 PLAS Index 위로 이동. GOSE는 Grade만 표시.
-- 홈페이지에서 요청한 GOSE 안내 문구와 Foot length 공개 버전 안내 문구 제거.
-- Singleton(NICHD Asian) 기본 / DC twin / MC twin EFW 참고치, AFI, kidney length, thymic diameter, foot length 참고치 추가.
-- Kidney P5/P95와 thymic lower 95% reference limit 복사 가능한 문구 표시.
-- RV/LV >= 1.5는 `Rt dominant heart (RV:LV = 0.00)`, 미만은 `Not definite Rt dominant heart (RV:LV = 0.00)` 형식. 소수점 둘째 자리.
-- RV → LV → RA → LA 입력 순서 유지, 측정값만 초기화.
+## 근거
+- Krakow et al. Guidelines for the prenatal diagnosis of fetal skeletal dysplasias. Genetics in Medicine (2009). https://pmc.ncbi.nlm.nih.gov/articles/PMC2832320/
+- Wood et al. The Reliability of Ultrasound Markers in Identifying Fetuses With a Life-Limiting Skeletal Dysplasia. Prenatal Diagnosis (2024). https://pubmed.ncbi.nlm.nih.gov/39078648/
+
+기존 참고치의 출처와 이용 조건은 각 소스 파일을 확인하세요. 환자 식별정보는 입력하지 마세요. 임상 사용 전 원문 수치 및 계산식 검증이 필요합니다.
 
 ## 실행
-
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## 참고자료 및 주의
-- 출처 설명은 `reference_data.py`의 `REFERENCE_INFO`를 참고하세요.
-- NICHD Fetal Growth Studies Asian cohort, EFW 표.
-- Ananth et al. (1998), DC/MC twin smoothed birthweight percentiles. **초음파 EFW 성장곡선이 아닌 출생체중 분포**입니다.
-- Moore & Cayle (1990), AFI reference percentiles.
-- Foot length, J Ultrasound Med 2000 (제공된 표; 서지정보 확인 필요).
-- Thymic diameter, Ultrasound Obstet Gynecol 2007;29:634–638. 표의 95% reference range 하한은 **5th percentile과 동일하다고 볼 수 없습니다**.
-- Fetal kidney length fitted centiles, Table S2 (정확한 원문 서지정보 확인 필요).
 
-주+일 참고치는 주별 값의 선형보간이며 논문에서 직접 제공한 값은 아닙니다. 제공된 사진과 코드의 전수 원문 대조, 계산식의 임상 검증 및 원문 표 데이터 재사용·공개 권한 확인이 필요합니다. 환자 식별정보를 입력하지 마세요.
+## v11 변경사항
+- 홈페이지 상단의 시제품 경고 문구 삭제 (실제 임상 적용 전 검증 필요성은 동일)
+- Singleton은 EFW 1개, DC/MC twin은 Twin A / Twin B EFW 2개 입력
+- Twin A / Twin B 각각의 참고치 및 P50 기준 추정 주수 표시
+- Twin EFW discordance (%) 자동 계산: |A-B| / max(A,B) × 100
+- 전체 입력 초기화 시 임신 주수 및 임신 형태는 유지
+\n\n## v13\n- Removed valve ratios (TV/MV, PV/AV).\n- Added CTCR (cardiac circumference / thoracic circumference) and CTAR (cardiac area / thoracic area), with per-item copyable output.\n- EFW per-fetus results now appear directly beneath each input; Kidney, AFI and Thymus show copyable value-and-reference lines beneath their inputs.\n- FL/AC and TC/AC outputs placed beneath their own measurement sections.\n
