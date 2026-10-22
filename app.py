@@ -350,7 +350,7 @@ with c1:
 with c2:
     st.button('↺ 전체 수치 리셋',on_click=reset_inputs,use_container_width=True)
 
-st.markdown('**공통 임신 주수**')
+st.markdown('**임신 주수**')
 c1,c2=st.columns(2)
 with c1: weeks=st.number_input('Weeks',min_value=10,max_value=42,value=None,step=1,key='ga_w',placeholder='주수 입력')
 with c2: days=st.number_input('Days',min_value=0,max_value=6,value=None,step=1,key='ga_d',placeholder='일수 입력')
@@ -485,7 +485,7 @@ with musculo:
     # 측정한 Rt/Lt 길이와 주수별 5th percentile을 한 문장으로 복사할 수 있게 표시.
     foot_row=get_ref(FOOT_CM)
     if foot_row is None:
-        st.caption('Foot length 참고치: 15–37주 (마지막 주는 0일). 공통 임신 주수를 입력해 주세요.')
+        st.caption('Foot length 참고치: 15–37주 (마지막 주는 0일). 임신 주수를 입력해 주세요.')
     else:
         foot_p5_mm=foot_row[0]*10  # published table is in cm
         if foot_values:
@@ -544,7 +544,7 @@ with digestive:
         stomach=number('Stomach','stomach')
         row=get_ref(STOMACH)
         if row is None:
-            st.caption('참고치 범위: 14–40주. 공통 임신 주수를 입력해 주세요.')
+            st.caption('참고치 범위: 14–40주. 임신 주수를 입력해 주세요.')
         else:
             reference_line('Stomach',stomach,f'Ref. {ga_ref} 5th percentile: {row[2]:.1f} mm; 95th percentile: {row[8]:.1f} mm')
             extra_source('STOMACH')
@@ -658,7 +658,7 @@ with refs:
             if efw is None:
                 return
             if row is None:
-                st.caption(f'{label}: {efw:g} g — 주수별 참고치 범위: {min(t)}–{max(t)}주')
+                st.code(f'{label}: {efw:g} g (Percentile unavailable: reference GA {min(t)}–{max(t)}w)',language=None)
                 return
             band=percentile_band(efw,ps,row)
             closest=nearest_reference_percentile(efw,ps,row)
@@ -667,8 +667,8 @@ with refs:
             if closest is not None:
                 pct,ref_g=closest
                 suffix='rd' if pct==3 else 'th'
-                st.code(f'{label}: {efw:g} g{size_text} (Ref. {ga_ref} {pct}{suffix} percentile: {ref_g:.0f} g)',language=None)
-                st.caption(f'Percentile interval: {band} · size는 P50 기준 추정 주수')
+                st.code(f'{label}: {efw:g} g{size_text} ({band}; Ref. {ga_ref} nearest {pct}{suffix} percentile: {ref_g:.0f} g)',language=None)
+                st.caption('표시된 백분위수는 구간이며, nearest는 가장 가까운 참고표 수치입니다. size는 P50 기준 추정 주수입니다.')
             else:
                 st.code(f'{label}: {efw:g} g{size_text} (Ref. unavailable)',language=None)
 
@@ -686,6 +686,8 @@ with refs:
             if efw_a is not None and efw_b is not None:
                 discordance=abs(efw_a-efw_b)/max(efw_a,efw_b)*100
                 st.code(f'EFW discordance: {discordance:.1f}%',language=None)
+        if row is None and weeks is not None and days is not None:
+            st.info(f'선택한 {weeks}주 {days}일의 참고치가 없습니다. {refname.replace("EFW_", "")} 참고표 제공 범위는 {min(t)}–{max(t)}주이므로, 이 주수의 EFW 백분위수는 산출하지 않습니다.')
         if row is not None:
             st.caption(' | '.join(f'P{pct}: {val:.0f} g' for pct,val in zip(ps,row) if val is not None))
             ref_caption(refname)

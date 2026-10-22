@@ -23,3 +23,9 @@ v15: Thymic diameter moved to Heart; Kidney length moved to Digestive & Urinary;
 ## v18 changes
 - Omit EFW equivalent gestational age when outside the supported P50 table range, instead of printing size unavailable.
 - AFI copyable result displays only the nearest published P3/P5/P50/P95/P97 reference knot, not both P5 and P95. This is the closest table value, not an estimated exact percentile.
+
+
+v19: EFW percentile intervals are shown in individual results when GA reference is available; missing GA reference explicitly explained without extrapolation. Twin Ananth references are birthweight data, not prenatal EFW standards.
+
+
+v20: UI wording simplified from 공통 임신 주수 to 임신 주수.
