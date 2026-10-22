@@ -1,10 +1,327 @@
 from __future__ import annotations
 import math
 import streamlit as st
-from calculations import ratio, plas_index, gose_ratio
-from reference_calc import at_ga, percentile_band, median_equivalent_ga, nearest_reference_percentile
-from reference_data import EFW_SINGLE, EFW_DC, EFW_MC, AFI, FOOT_CM, THYMUS_CM, KIDNEY_MM, REFERENCE_INFO
-from reference_extra import DESCENDING_RECTUM, SMALL_BOWEL_COLON, STOMACH, NASAL_BONE, EAR_LENGTH, EXTRA_SOURCES
+
+
+# ===== Bundled calculations.py =====
+"""Arithmetic for fetal ultrasound quick-reference calculations.
+
+No reference percentiles, diagnostic cutoffs, or clinical interpretation are
+included. Inputs for each ratio must use the same units and measurement type.
+"""
+import math
+
+
+def _valid(*values: float) -> None:
+    if not values or any(not math.isfinite(x) or x <= 0 for x in values):
+        raise ValueError("측정값은 모두 0보다 큰 유한한 숫자여야 합니다.")
+
+
+def ratio(numerator: float, denominator: float) -> float:
+    _valid(numerator, denominator)
+    return numerator / denominator
+
+
+def fl_foot(fl_mm: float, foot_mm: float) -> float:
+    return ratio(fl_mm, foot_mm)
+
+
+def fl_ac(fl_mm: float, ac_mm: float) -> float:
+    return ratio(fl_mm, ac_mm)
+
+
+def tc_ac(tc_mm: float, ac_mm: float) -> float:
+    return ratio(tc_mm, ac_mm)
+
+
+def plas_index(posterior_la_to_dao_mm: float, dao_diameter_mm: float) -> float:
+    return ratio(posterior_la_to_dao_mm, dao_diameter_mm)
+
+
+def gose_ratio(ra_area_cm2: float, atrialized_rv_area_cm2: float,
+               functional_rv_area_cm2: float, la_area_cm2: float,
+               lv_area_cm2: float) -> float:
+    """Celermajer/GOSE area ratio (RA + atrialized RV)/(functional RV + LA + LV)."""
+    _valid(ra_area_cm2, atrialized_rv_area_cm2, functional_rv_area_cm2,
+           la_area_cm2, lv_area_cm2)
+    return (ra_area_cm2 + atrialized_rv_area_cm2) / (
+        functional_rv_area_cm2 + la_area_cm2 + lv_area_cm2)
+
+
+# ===== Bundled reference_calc.py =====
+"""Safe table lookup/interpolation for gestational-age-specific published reference knots."""
+import math
+
+
+def at_ga(table: dict, weeks: int, days: int):
+    """Linear interpolation between nearest published GA knots; never extrapolate.
+
+    Supports both weekly and alternate-week tables. None cells remain unavailable.
+    """
+    if not 0 <= days <= 6:
+        raise ValueError('days must be 0–6')
+    ga = weeks + days / 7
+    knots = sorted(table)
+    if not knots or ga < knots[0] or ga > knots[-1]:
+        return None
+    if days == 0 and weeks in table:
+        return table[weeks]
+    lower = max((w for w in knots if w <= ga), default=None)
+    upper = min((w for w in knots if w >= ga), default=None)
+    if lower is None or upper is None:
+        return None
+    if lower == upper:
+        return table[lower]
+    weight = (ga - lower) / (upper - lower)
+    a, b = table[lower], table[upper]
+    return [None if x is None or y is None else x + (y - x) * weight for x,y in zip(a,b)]
+
+
+def percentile_band(value: float, percentiles: list[int], reference: list[float | None]):
+    """Return only a percentile *interval*, never a fabricated exact percentile."""
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError('Invalid measurement')
+    valid = [(p, v) for p,v in zip(percentiles, reference) if v is not None]
+    if not valid:
+        return 'Reference unavailable'
+    if value < valid[0][1]:
+        return f'< P{valid[0][0]}'
+    for (p0,v0),(p1,v1) in zip(valid, valid[1:]):
+        if value == v0:
+            return f'P{p0}'
+        if value < v1:
+            return f'P{p0}–P{p1}'
+    if value == valid[-1][1]:
+        return f'P{valid[-1][0]}'
+    return f'> P{valid[-1][0]}'
+
+
+def gose_grade(ratio: float) -> int:
+    """Celermajer/GOSE area ratio grades; 1.5 allocated to Grade 4."""
+    if not math.isfinite(ratio) or ratio <= 0:
+        raise ValueError('Invalid GOSE ratio')
+    if ratio < .5: return 1
+    if ratio < 1.0: return 2
+    if ratio < 1.5: return 3
+    return 4
+
+
+def nearest_reference_percentile(value, percentiles, reference):
+    """Nearest published percentile knot; never pretend this is an exact percentile."""
+    valid=[(p,v) for p,v in zip(percentiles,reference) if v is not None]
+    return min(valid,key=lambda pair: abs(pair[1]-value)) if valid else None
+
+def median_equivalent_ga(weight_g, table):
+    """Interpolate GA using P50 weight curve; return completed weeks and days."""
+    points=sorted((w, row[len(row)//2]) for w,row in table.items() if row[len(row)//2] is not None)
+    if not points or weight_g < points[0][1] or weight_g > points[-1][1]:
+        return None
+    for (w0,v0),(w1,v1) in zip(points,points[1:]):
+        if v0 <= weight_g <= v1 and v1 > v0:
+            total_days=round((w0+(weight_g-v0)/(v1-v0)*(w1-w0))*7)
+            return divmod(total_days,7)
+    if weight_g == points[-1][1]: return points[-1][0],0
+    return None
+
+
+# ===== Bundled reference_data.py =====
+"""Published tabulated reference points transcribed from user-provided clinical reference photos.
+Values are reference table knots, not patient data. Validate against original articles
+before clinical deployment. GA = completed weeks, with linear interpolation for days.
+"""
+
+# Singleton EFW (g): NICHD Fetal Growth Studies, Asian cohort; P3, P5, P10, P50, P90, P95, P97.
+# Source photo contains an apparent typographic error at GA 21 P97 ('380' < P95 467);
+# this cell is withheld rather than silently corrected.
+EFW_SINGLE = {
+10:[18,19,20,24,30,31,33],11:[26,27,28,34,41,43,44],12:[36,38,39,47,55,58,60],
+13:[50,51,53,63,74,77,79],14:[66,68,71,83,97,101,104],15:[86,88,92,108,125,131,135],
+16:[110,113,118,138,160,167,172],17:[139,143,149,173,202,211,216],18:[172,177,185,215,250,261,269],
+19:[211,217,227,264,307,321,330],20:[257,264,275,320,373,389,400],21:[308,317,331,385,447,467,None],
+22:[367,378,394,458,532,556,571],23:[434,446,466,541,628,656,674],24:[509,524,546,634,737,769,790],
+25:[594,611,637,740,859,896,921],26:[690,709,740,859,997,1040,1069],27:[796,818,853,990,1149,1199,1232],
+28:[913,938,978,1136,1318,1375,1413],29:[1039,1068,1114,1293,1501,1566,1609],
+30:[1175,1208,1260,1463,1698,1772,1821],31:[1318,1355,1414,1642,1908,1991,2047],
+32:[1467,1508,1574,1830,2129,2222,2284],33:[1620,1667,1740,2026,2360,2464,2534],
+34:[1778,1829,1911,2229,2600,2717,2795],35:[1938,1995,2085,2438,2851,2980,3067],
+36:[2100,2162,2262,2653,3111,3255,3352],37:[2259,2327,2437,2869,3376,3536,3644],
+38:[2408,2483,2604,3077,3637,3814,3933],39:[2539,2621,2752,3269,3884,4078,4210],
+40:[2643,2731,2873,3434,4105,4318,4462],
+}
+# Ananth et al 1998, smoothed birth weight percentiles (g) for twins: P5 P10 P50 P90 P95.
+EFW_DC = {
+23:[477,513,632,757,801],24:[538,578,712,853,903],25:[606,652,803,962,1018],
+26:[684,735,906,1085,1148],27:[771,829,1021,1223,1294],28:[870,935,1152,1379,1459],
+29:[980,1054,1298,1554,1645],30:[1102,1186,1460,1748,1850],31:[1235,1328,1635,1958,2072],
+32:[1374,1477,1819,2179,2306],33:[1515,1630,2007,2403,2543],34:[1653,1778,2190,2622,2775],
+35:[1781,1916,2359,2825,2989],36:[1892,2035,2506,3001,3176],37:[1989,2139,2634,3155,3339],
+38:[2079,2236,2753,3297,3489],39:[2167,2331,2870,3437,3637],40:[2258,2428,2990,3581,3790],
+41:[2352,2530,3115,3731,3948],
+}
+EFW_MC = {
+23:[392,431,533,648,683],24:[456,501,620,758,794],25:[530,582,720,875,922],
+26:[615,676,836,1017,1072],27:[713,784,970,1178,1242],28:[823,904,1119,1360,1433],
+29:[944,1037,1282,1559,1643],30:[1072,1178,1457,1771,1867],31:[1204,1323,1637,1990,2097],
+32:[1335,1467,1814,2205,2325],33:[1457,1601,1980,2407,2537],34:[1562,1716,2123,2580,2720],
+35:[1646,1808,2237,2719,2866],36:[1728,1899,2349,2855,3009],37:[1831,2012,2489,3025,3189],
+38:[1957,2150,2660,3233,3408],39:[2100,2307,2854,3469,3657],40:[2255,2478,3065,3726,3927],
+41:[2422,2661,3292,4001,4217],
+}
+# Moore & Cayle 1990, AFI (mm) P3 P5 P50 P95 P97
+AFI = {
+16:[73,79,121,185,201],17:[77,83,127,194,211],18:[80,87,133,202,220],
+19:[83,90,137,207,225],20:[86,93,141,212,230],21:[88,95,143,214,233],
+22:[89,97,145,216,235],23:[90,98,146,218,237],24:[90,98,147,219,238],
+25:[89,97,147,221,240],26:[89,97,147,223,242],27:[85,95,146,226,245],
+28:[86,94,146,228,249],29:[84,92,145,231,254],30:[82,90,145,234,258],
+31:[79,88,144,238,263],32:[77,86,144,242,269],33:[74,83,143,245,274],
+34:[72,81,142,248,278],35:[70,79,140,249,279],36:[68,77,138,249,279],
+37:[66,75,135,244,275],38:[65,73,132,239,269],39:[64,72,127,226,255],
+40:[63,71,123,214,240],41:[63,70,116,194,216],42:[63,69,110,175,192],
+}
+# Foot length in cm P5 P10 P50 P90 P95, from photo, Meriowitz/Ananth/Smulian J Ultrasound Med 2000
+FOOT_CM = {
+15:[1.4,1.5,1.8,2.2,2.3],16:[1.6,1.7,2.1,2.5,2.6],17:[1.9,2.0,2.4,2.8,2.9],
+18:[2.2,2.3,2.7,3.1,3.2],19:[2.5,2.6,3.0,3.3,3.4],20:[2.8,2.9,3.2,3.6,3.7],
+21:[3.1,3.2,3.5,3.9,4.0],22:[3.4,3.5,3.9,4.2,4.3],23:[3.7,3.8,4.2,4.6,4.7],
+24:[4.0,4.1,4.5,4.9,5.0],25:[4.3,4.4,4.8,5.1,5.2],26:[4.6,4.7,5.1,5.4,5.5],
+27:[4.8,4.9,5.3,5.7,5.8],28:[5.1,5.2,5.6,5.9,6.0],29:[5.3,5.4,5.8,6.2,6.3],
+30:[5.6,5.7,6.1,6.4,6.5],31:[5.8,5.9,6.3,6.7,6.8],32:[6.0,6.1,6.5,6.9,7.0],
+33:[6.3,6.4,6.8,7.1,7.2],34:[6.5,6.6,7.0,7.4,7.5],35:[6.8,6.9,7.3,7.6,7.7],
+36:[7.0,7.1,7.5,7.9,8.0],37:[7.3,7.4,7.7,8.1,8.2],
+}
+# UOG 2007 29:634-638, thymic diameter cm: mean and lower/upper 95% reference limits.
+# The lower bound is NOT a published fifth percentile.
+THYMUS_CM = {
+19:[1.2,0.6,1.8],20:[1.4,0.7,2.0],21:[1.5,0.9,2.1],22:[1.6,1.0,2.3],
+23:[1.8,1.2,2.4],24:[1.9,1.3,2.6],25:[2.1,1.5,2.7],26:[2.2,1.6,2.9],
+27:[2.4,1.8,3.0],28:[2.5,1.9,3.2],29:[2.7,2.0,3.3],30:[2.8,2.2,3.5],
+31:[3.0,2.3,3.6],32:[3.1,2.5,3.7],33:[3.3,2.6,3.9],34:[3.4,2.8,4.0],
+35:[3.6,2.9,4.2],36:[3.7,3.1,4.3],37:[3.9,3.2,4.5],38:[4.0,3.4,4.6],
+}
+# Kidney length (mm): P5 P50 P95; GA 16-41, Table S2 from source photo.
+KIDNEY_MM = {
+16:[11.5,14.2,17.0],17:[12.9,15.7,18.4],18:[14.3,17.1,19.9],19:[15.7,18.5,21.3],
+20:[17.1,19.9,22.7],21:[18.4,21.3,24.1],22:[19.7,22.6,25.6],23:[21.0,24.0,27.0],
+24:[22.3,25.3,28.4],25:[23.5,26.6,29.8],26:[24.7,27.9,31.1],27:[25.9,29.2,32.5],
+28:[27.1,30.5,33.9],29:[28.3,31.7,35.2],30:[29.4,33.0,36.5],31:[30.5,34.2,37.9],
+32:[31.6,35.4,39.2],33:[32.7,36.6,40.5],34:[33.8,37.8,41.7],35:[34.8,38.9,43.0],
+36:[35.9,40.1,44.3],37:[36.9,41.2,45.5],38:[37.9,42.3,46.8],39:[38.9,43.4,48.0],
+40:[39.8,44.5,49.2],41:[40.7,45.5,50.4],
+}
+
+REFERENCE_INFO = {
+'EFW_SINGLE':'NICHD Fetal Growth Studies, Asian-specific fetal anthropometric percentiles (Table B-I).',
+'EFW_DC':'Ananth et al. (1998), smoothed birthweight percentiles for dichorionic twins (Table III-3).',
+'EFW_MC':'Ananth et al. (1998), smoothed birthweight percentiles for monochorionic twins (Table III-4).',
+'AFI':'Moore & Cayle (1990), Am J Obstet Gynecol 162:1168, Table C-1.',
+'FOOT_CM':'Meriowitz/Ananth/Smulian et al., Foot length in fetuses with abnormal growth, J Ultrasound Med 19:201 (2000), Table A-23; bibliographic spelling to verify.',
+'THYMUS_CM':'Ultrasound in Obstetrics & Gynecology (2007) 29:634–638, predicted fetal thymic diameter 95% reference range (Table 2).',
+'KIDNEY_MM':'Fitted centiles of fetal kidney length (Table S2, GA 16–41); full paper bibliographic details pending.',
+}
+
+
+# ===== Bundled reference_extra.py =====
+"""Gestational age tables transcribed from user-supplied reference photographs.
+Values for full completed weeks. In-between days are linearly interpolated in app.
+Ranges are NOT interchangeable: CI for a mean != prediction interval for a fetus.
+Confirm each source and data usage rights before publishing the tables.
+"""
+# UOG 2003;21:161-164: GA: [mean descending colon, CI lower, CI upper, mean rectum, CI lower, CI upper], mm.
+# 19-20 weeks are a single reported band, used unchanged for weeks 19 and 20.
+DESCENDING_RECTUM = {
+19:[3.52,.79,6.26,3.64,1.45,5.82],20:[3.52,.79,6.26,3.64,1.45,5.82],
+21:[3.59,.86,6.32,3.79,1.61,5.97],22:[3.59,.96,6.41,3.95,1.78,6.13],
+23:[3.82,1.09,6.54,4.14,1.97,6.31],24:[3.98,1.26,6.70,4.34,2.17,6.52],
+25:[4.18,1.46,6.90,4.57,2.40,6.74],26:[4.43,1.70,7.15,4.82,2.64,6.99],
+27:[4.71,1.99,7.43,5.08,2.91,7.26],28:[5.04,2.32,7.76,5.38,3.20,7.55],
+29:[5.42,2.69,8.14,5.69,3.52,7.87],30:[5.84,3.12,8.57,6.04,3.86,8.21],
+31:[6.32,3.60,9.05,6.41,4.23,8.58],32:[6.86,4.13,9.58,6.80,4.63,8.98],
+33:[7.45,4.72,10.17,7.23,5.05,9.40],34:[8.10,5.37,10.82,7.68,5.51,9.85],
+35:[8.81,6.09,11.53,8.17,5.99,10.34],36:[9.59,6.87,12.31,8.68,6.51,10.85],
+37:[10.44,7.71,13.16,9.23,7.06,11.40],38:[11.35,8.63,14.08,9.81,7.64,11.98],
+39:[12.34,9.61,15.07,10.43,8.25,12.61],40:[13.40,10.66,16.15,11.08,2.89,13.26],
+}
+# 40-week rectal CI lower 2.89 is as photographed but unusually low; withhold until checked.
+DESCENDING_RECTUM[40][4] = None
+
+# Lap et al., Reference curves for the normal fetal small bowel and colon diameters.
+# GA: [small bowel mean, PI low, PI high, colon mean, PI low, PI high], mm.
+SMALL_BOWEL_COLON = {
+20:[1.7,.4,3.5,1.8,None,None], # 20wk colon 0.0-0.4 in image conflicts with mean 1.8: withhold interval
+22:[2.1,.7,3.9,2.9,.8,5.5],24:[2.4,.9,4.3,3.9,1.5,6.7],
+26:[2.7,1.2,4.7,4.8,2.2,7.8],28:[3.1,1.4,5.1,5.7,3.0,8.8],
+30:[3.4,1.7,5.5,6.6,3.7,9.8],32:[3.8,2.0,5.9,7.7,4.6,11.0],
+34:[4.1,2.2,6.3,8.9,5.6,12.5],36:[4.4,2.5,6.7,10.4,6.8,14.3],
+38:[4.8,2.8,7.1,12.3,8.2,16.5],40:[5.1,3.0,7.6,14.5,9.8,19.4],
+}
+# Kassif et al., stomach axial diameter modelled centiles, GA: P1 P3 P5 P10 P25 P50 P75 P90 P95 P97 P99 (mm)
+STOMACH = {
+14:[2.1,2.7,3.0,3.5,4.3,5.2,6.1,6.9,7.3,7.6,8.2],
+15:[2.7,3.3,3.6,4.1,5.0,5.9,6.8,7.7,8.2,8.5,9.1],
+16:[3.2,3.9,4.2,4.7,5.6,6.6,7.6,8.5,9.0,9.4,10.1],
+17:[3.6,4.3,4.7,5.3,6.3,7.3,8.4,9.4,10.0,10.3,11.1],
+18:[4.0,4.8,5.2,5.8,6.9,8.1,9.2,10.3,10.9,11.3,12.2],
+19:[4.3,5.2,5.6,6.3,7.5,8.8,10.1,11.2,11.9,12.4,13.3],
+20:[4.4,5.3,6.0,6.8,8.1,9.5,10.9,12.2,13.0,13.6,14.4],
+21:[4.6,5.6,6.4,7.2,8.6,10.2,11.8,13.2,14.0,14.7,15.6],
+22:[4.8,5.9,6.7,7.6,9.2,10.9,12.6,14.1,15.1,15.9,16.8],
+23:[4.9,6.2,7.0,8.0,9.7,11.6,13.4,15.1,16.1,17.0,18.0],
+24:[5.1,6.4,7.3,8.4,10.2,12.2,14.2,16.1,17.1,18.1,19.2],
+25:[5.2,6.6,7.6,8.8,10.7,12.9,15.1,17.0,18.2,19.2,20.4],
+26:[5.3,6.9,7.9,9.2,11.2,13.5,15.8,17.9,19.2,20.2,21.5],
+27:[5.5,7.1,8.2,9.6,11.7,14.2,16.6,18.8,20.1,21.2,22.6],
+28:[5.7,7.4,8.6,9.9,12.2,14.8,17.3,19.6,21.0,22.2,23.7],
+29:[5.9,7.7,8.9,10.3,12.7,15.4,18.0,20.4,21.9,23.1,24.8],
+30:[6.1,8.0,9.2,10.7,13.2,16.0,18.7,21.2,22.7,24.0,25.5],
+31:[6.4,8.3,9.6,11.1,13.7,16.5,19.3,21.9,23.4,24.7,26.3],
+32:[6.8,8.7,10.0,11.6,14.2,17.0,19.9,22.5,24.0,25.4,27.0],
+33:[7.2,9.1,10.5,12.0,14.6,17.5,20.4,23.1,24.6,26.0,27.6],
+34:[7.7,9.6,11.0,12.5,15.1,18.0,20.9,23.5,25.1,26.4,28.1],
+35:[8.3,10.2,11.5,13.0,15.6,18.5,21.3,23.9,25.4,26.8,28.4],
+36:[8.9,10.8,12.1,13.6,16.1,18.9,21.7,24.2,25.7,27.0,28.6],
+37:[9.7,11.5,12.7,14.2,16.6,19.3,22.0,24.4,25.8,27.1,28.6],
+38:[10.6,12.3,13.5,14.8,17.1,19.6,22.2,24.5,25.8,27.0,28.4],
+39:[11.6,13.1,14.2,15.5,17.6,20.0,22.3,24.4,25.7,26.8,28.1],
+40:[12.7,14.1,15.1,16.2,18.1,20.2,22.4,24.3,25.4,26.4,27.6],
+}
+# Sonek et al., nasal bone lengths from 3537 fetal US measurements; P2.5 P5 P50 P95 P97.5 (mm)
+NASAL_BONE = {
+11:[1.3,1.4,2.3,3.3,3.4],12:[1.7,1.8,2.8,4.2,4.3],13:[2.2,2.3,3.1,4.6,4.8],
+14:[2.2,2.5,3.8,5.3,5.7],15:[2.8,3.0,4.3,5.7,6.0],16:[3.2,3.4,4.7,6.2,6.2],
+17:[3.7,4.0,5.3,6.6,6.9],18:[4.0,4.3,5.7,7.0,7.3],19:[4.6,5.0,6.3,7.9,8.2],
+20:[5.0,5.2,6.7,8.3,8.6],21:[5.1,5.6,7.1,9.0,9.3],22:[5.6,5.8,7.5,9.3,10.2],
+23:[6.0,6.4,7.9,9.6,9.9],24:[6.6,6.8,9.3,10.0,10.3],25:[6.3,6.5,8.5,10.7,10.8],
+26:[6.8,7.4,8.9,10.9,11.3],27:[7.0,7.5,9.2,11.3,11.6],28:[7.2,7.6,9.8,12.1,13.4],
+29:[7.2,7.7,9.8,11.8,12.3],30:[7.3,7.9,10.0,12.6,13.2],31:[7.9,8.2,10.4,12.6,13.2],
+32:[8.1,8.6,10.5,13.6,13.7],33:[8.6,8.7,10.8,12.8,13.0],34:[9.0,9.1,10.9,12.8,13.5],
+35:[7.5,8.5,11.0,14.1,15.0],36:[7.3,7.8,10.8,12.8,13.6],37:[8.4,8.7,11.4,14.5,15.0],
+38:[9.2,9.3,11.7,15.7,16.6],39:[9.1,9.2,10.9,14.0,14.8],40:[10.3,10.4,12.1,14.5,14.7],
+}
+# Chitkara et al., ultrasonographic ear length: P5 P10 P50 P90 P95 (mm)
+EAR_LENGTH = {
+15:[6.7,7.0,8.5,10.4,10.4],16:[8.2,8.5,10.0,11.2,11.6],17:[8.6,9.0,10.6,12.3,12.9],
+18:[9.0,9.8,11.7,13.7,14.3],19:[10.6,11.2,12.9,15.1,15.5],20:[11.5,12.3,14.3,16.4,17.3],
+21:[12.2,13.2,15.3,17.4,18.1],22:[13.2,14.2,16.7,18.6,18.9],23:[14.0,14.9,18.1,20.6,21.6],
+24:[15.3,15.8,19.7,21.9,22.3],25:[15.7,16.8,21.4,24.2,24.5],26:[16.6,16.8,21.2,23.8,24.2],
+27:[19.4,19.6,22.5,26.4,27.8],28:[17.6,19.9,24.4,30.1,31.9],29:[18.7,20.0,25.3,28.2,28.5],
+30:[18.3,20.7,25.1,27.9,31.6],31:[21.4,21.9,26.7,29.8,31.2],32:[25.3,25.8,28.1,31.1,33.0],
+33:[21.4,23.5,28.6,32.4,32.9],34:[22.7,26.9,29.2,33.3,34.0],35:[23.0,26.7,31.2,33.7,35.0],
+36:[23.9,27.5,31.1,33.3,34.5],37:[27.3,28.1,31.9,35.6,36.4],38:[24.8,25.6,32.2,36.9,38.7],
+39:[26.2,27.7,33.3,36.2,37.5],40:[28.1,29.3,32.6,35.7,37.6],
+}
+EXTRA_SOURCES = {
+ 'DESCENDING_RECTUM':'Fetal colon and rectal development, Ultrasound Obstet Gynecol 2003;21:161–164, Table 1 (95% confidence interval of the mean).',
+ 'SMALL_BOWEL_COLON':'Lap CC et al. Reference curves for the normal fetal small bowel and colon diameters; Table 1 (95% prediction interval).',
+ 'STOMACH':'Kassif et al. Stomach axial diameter modelled centiles, Table 2 (P5 and P95). Full bibliographic citation to verify.',
+ 'NASAL_BONE':'Sonek JD et al. Nasal bone length throughout gestation: normal ranges based on 3537 fetal ultrasound measurements, Table G-2.',
+ 'EAR_LENGTH':'Chitkara U et al. Ultrasonographic ear length measurement in normal second- and third-trimester fetuses, Table II.',
+}
+
+
+# ===== Streamlit application =====
+import math
+import streamlit as st
 
 st.set_page_config(page_title='Fetal Quick Calculator', page_icon='📐', layout='wide')
 st.markdown('<style>.block-container{max-width:1100px;padding-top:1.5rem}</style>', unsafe_allow_html=True)
