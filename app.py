@@ -1,169 +1,148 @@
 from __future__ import annotations
-
+import math
 import streamlit as st
-from calculations import fl_foot, fl_ac, tc_ac, ratio, plas_index, gose_ratio
+from calculations import ratio, plas_index, gose_ratio
 
-st.set_page_config(page_title="Fetal Quick Calculator", page_icon="📐", layout="wide")
-st.markdown("""<style>
-.block-container {max-width: 1080px; padding-top: 2rem}
-[data-testid="stMetricValue"] {font-size: 1.65rem}
-</style>""", unsafe_allow_html=True)
+st.set_page_config(page_title='Fetal Quick Calculator', page_icon='📐', layout='wide')
+st.markdown('<style>.block-container{max-width:1100px;padding-top:1.5rem}</style>', unsafe_allow_html=True)
 
-# Widget values must be cleared before the widgets are rendered.
-INPUT_KEYS = (
-    "rv", "lv", "ra", "la", "tv", "mv", "pv", "av",
-    "plas_dist", "dao", "g_ra", "g_arv", "g_frv", "g_la", "g_lv",
-    "fl", "foot", "ac", "tc",
-)
-
+INPUT_KEYS = ('rv','lv','ra','la','tv','mv','pv','av','plas_dist','dao',
+              'g_ra','g_arv','g_frv','g_la','g_lv','fl','foot','ac','tc',
+              'kidney','efw','afi','thymus')
 
 def reset_inputs():
     for key in INPUT_KEYS:
-        st.session_state[key] = ""
+        st.session_state[key] = ''
+    st.session_state['ga_w'] = 24
+    st.session_state['ga_d'] = 0
+    st.session_state['efw_group'] = 'Singleton'
 
-
-head, reset_col = st.columns([5, 1.2], vertical_alignment="bottom")
-with head:
-    st.title("Fetal Quick Calculator")
-    st.caption("태아 초음파 검사자를 위한 측정 비율 계산 및 ViewPoint 기록 초안 · Prototype v3")
-with reset_col:
-    st.button("↺ 전체 수치 리셋", on_click=reset_inputs, use_container_width=True, help="입력한 모든 측정값을 지웁니다.")
-
-st.info("임상 검증 전 시제품입니다. 환자 식별정보를 입력하지 마세요. 결과는 검사자가 측정 기준·단위·참고문헌을 확인한 후 사용해야 합니다.")
-
-
-def num(label: str, key: str, unit: str = "mm", help_text: str | None = None):
-    raw = st.text_input(f"{label} ({unit})", key=key, placeholder="측정값 입력", help=help_text)
+def number(label, key, unit='mm'):
+    raw = st.text_input(f'{label} ({unit})', key=key, placeholder='측정값 입력')
     if not raw.strip():
         return None
     try:
-        value = float(raw.strip())
-        if not (0 < value < float("inf")):
+        val = float(raw)
+        if not math.isfinite(val) or val <= 0:
             raise ValueError
-        return value
+        return val
     except ValueError:
-        st.warning(f"{label}: 0보다 큰 숫자를 입력해 주세요.")
+        st.error(f'{label}: 0보다 큰 유한한 숫자를 입력해 주세요.')
         return None
 
-
-def result(label, value, unit="", percent=False):
-    if value is None:
+reports=[]
+def show_ratio(name, a, b, show_percent=False):
+    if a is None or b is None:
         return
-    st.metric(label, f"{value:.3f}{unit}")
-    if percent:
-        st.caption(f"백분율 표현: {value * 100:.1f}%")
-    lines.append(f"{label}: {value:.3f}{unit}")
+    val = ratio(a,b)
+    st.metric(name, f'{val:.3f}')
+    if show_percent:
+        st.caption(f'{val*100:.1f}%')
+    reports.append(f'{name}: {val:.3f}')
 
+c1,c2=st.columns([5,1.5],vertical_alignment='bottom')
+with c1:
+    st.title('Fetal Quick Calculator')
+    st.caption('심장 · 근골격계 · 참고치 입력 준비 | Public prototype')
+with c2:
+    st.button('↺ 전체 수치 리셋',on_click=reset_inputs,use_container_width=True)
+st.warning('임상 검증 전 시제품입니다. 환자 식별정보를 입력하지 마세요. 공개 버전에는 논문 참고치 표를 포함하지 않습니다.')
 
-def pair_result(label, a, b, percent=False):
-    if a is not None and b is not None:
-        result(label, ratio(a, b), percent=percent)
+st.markdown('**공통 임신 주수**')
+c1,c2=st.columns(2)
+with c1: weeks=st.number_input('Weeks',min_value=10,max_value=42,value=24,step=1,key='ga_w')
+with c2: days=st.number_input('Days',min_value=0,max_value=6,value=0,step=1,key='ga_d')
+ga=f'{weeks}w{days}d'
 
-
-lines = []
-tabs = st.tabs(["🫀 심장", "🦴 근골격계·흉곽", "📚 참고치 (추가 예정)"])
-
-with tabs[0]:
-    st.subheader("심장 계산기")
-    st.markdown("**심실·심방 비율**")
-    st.caption("같은 비율의 분자·분모는 반드시 동일한 측정 방식과 단위를 사용하세요. 아래 기본 입력은 길이(mm)입니다.")
-    c1, c2 = st.columns(2)
+heart, musculo, refs=st.tabs(['🫀 심장','🦴 근골격계·흉곽','📚 참고치 (준비 중)'])
+with heart:
+    st.subheader('심장 계산기')
+    st.markdown('**심실·심방 비율**')
+    c1,c2=st.columns(2)
     with c1:
-        rv = num("RV dimension", "rv")
-        ra = num("RA dimension", "ra")
+        rv=number('RV dimension','rv'); ra=number('RA dimension','ra')
     with c2:
-        lv = num("LV dimension", "lv")
-        la = num("LA dimension", "la")
-    c1, c2 = st.columns(2)
-    with c1:
-        pair_result("RV/LV", rv, lv)
-    with c2:
-        pair_result("RA/LA", ra, la)
-
+        lv=number('LV dimension','lv'); la=number('LA dimension','la')
+    c1,c2=st.columns(2)
+    with c1: show_ratio('RV/LV',rv,lv)
+    with c2: show_ratio('RA/LA',ra,la)
     st.divider()
-    st.markdown("**판막 비율**")
-    st.caption("판막 직경은 동일한 시기·측정 기준의 mm 값으로 입력하세요.")
-    c1, c2 = st.columns(2)
+    st.markdown('**판막 비율**')
+    c1,c2=st.columns(2)
     with c1:
-        tv = num("TV annulus", "tv")
-        pv = num("PV annulus", "pv")
+        tv=number('TV annulus','tv'); pv=number('PV annulus','pv')
     with c2:
-        mv = num("MV annulus", "mv")
-        av = num("AV annulus", "av")
-    c1, c2 = st.columns(2)
-    with c1:
-        pair_result("TV/MV", tv, mv)
-    with c2:
-        pair_result("PV/AV", pv, av)
-
+        mv=number('MV annulus','mv'); av=number('AV annulus','av')
+    c1,c2=st.columns(2)
+    with c1: show_ratio('TV/MV',tv,mv)
+    with c2: show_ratio('PV/AV',pv,av)
     st.divider()
-    st.markdown("**PLAS index · TAPVR 관련**")
-    st.caption("LA 후벽과 descending aorta 사이 거리 / descending aorta 직경. 동일한 영상면과 측정 기준 확인이 필요합니다.")
-    c1, c2 = st.columns(2)
-    with c1:
-        plas_dist = num("Post-LA distance", "plas_dist")
-    with c2:
-        dao = num("Descending aorta diameter", "dao")
-    if plas_dist is not None and dao is not None:
-        result("PLAS index", plas_index(plas_dist, dao))
-
+    st.markdown('**PLAS Index (TAPVR 관련)**')
+    c1,c2=st.columns(2)
+    with c1: dist=number('Post-LA distance','plas_dist')
+    with c2: dao=number('Descending aorta diameter','dao')
+    if dist is not None and dao is not None:
+        val=plas_index(dist,dao)
+        st.metric('PLAS Index',f'{val:.3f}')
+        reports.append(f'PLAS Index: {val:.3f}')
     st.divider()
-    st.markdown("**GOSE / Celermajer area ratio · Ebstein 관련**")
-    st.caption("(RA area + atrialized RV area) / (functional RV area + LA area + LV area). 면적은 cm²로 통일합니다. 임상 등급 판정은 제공하지 않습니다.")
-    c1, c2 = st.columns(2)
+    st.markdown('**GOSE Score (Ebstein 관련)**')
+    st.caption('면적 단위 cm². (RA + atrialized RV) / (functional RV + LA + LV)')
+    c1,c2=st.columns(2)
     with c1:
-        ra_area = num("RA area", "g_ra", "cm²")
-        arv_area = num("Atrialized RV area", "g_arv", "cm²")
-        frv_area = num("Functional RV area", "g_frv", "cm²")
+        gra=number('RA area','g_ra','cm²'); garv=number('Atrialized RV area','g_arv','cm²'); gfrv=number('Functional RV area','g_frv','cm²')
     with c2:
-        la_area = num("LA area", "g_la", "cm²")
-        lv_area = num("LV area", "g_lv", "cm²")
-    vals = [ra_area, arv_area, frv_area, la_area, lv_area]
-    if all(v is not None for v in vals):
-        result("GOSE area ratio", gose_ratio(*vals))
-    st.caption("※ GOSE 측정 범위 및 기관별 기록 방식은 담당 교수·원내 프로토콜과 최종 대조해 주세요.")
+        gla=number('LA area','g_la','cm²'); glv=number('LV area','g_lv','cm²')
+    if all(v is not None for v in (gra,garv,gfrv,gla,glv)):
+        val=gose_ratio(gra,garv,gfrv,gla,glv)
+        grade=1 if val<.5 else 2 if val<1 else 3 if val<1.5 else 4
+        st.metric('GOSE Grade',str(grade))
+        reports.append(f'GOSE Grade: {grade}')
+    st.caption('Grade만 표시합니다. 예후 수치 및 사망률은 표시하지 않습니다. 측정 기준과 경계값은 임상 검증이 필요합니다.')
 
-with tabs[1]:
-    st.subheader("근골격계 및 흉곽")
-    st.caption("길이 및 둘레는 모두 mm로 입력합니다. Ratio는 무단위입니다.")
-    c1, c2 = st.columns(2)
+with musculo:
+    st.subheader('근골격계·흉곽')
+    st.caption('길이·둘레는 mm 단위로 입력합니다.')
+    c1,c2=st.columns(2)
     with c1:
-        fl = num("FL", "fl")
-        foot = num("Foot length", "foot")
-        ac = num("AC", "ac")
-    with c2:
-        tc = num("TC (Thoracic circumference)", "tc")
-    st.divider()
-    r1, r2, r3 = st.columns(3)
-    with r1:
-        if fl is not None and foot is not None:
-            result("FL/Foot", fl_foot(fl, foot))
-    with r2:
-        if fl is not None and ac is not None:
-            result("FL/AC", fl_ac(fl, ac), percent=True)
-    with r3:
-        if tc is not None and ac is not None:
-            result("TC/AC", tc_ac(tc, ac))
+        fl=number('FL','fl'); foot=number('Foot length','foot'); ac=number('AC','ac')
+    with c2: tc=number('Thoracic circumference','tc')
+    c1,c2,c3=st.columns(3)
+    with c1: show_ratio('FL/Foot',fl,foot)
+    with c2: show_ratio('FL/AC',fl,ac,True)
+    with c3: show_ratio('TC/AC',tc,ac)
+    st.info('Foot length의 주수별 percentile 참고치는 공개 버전에서 제외했습니다. FL/Foot 계산은 정상 작동합니다.')
 
-with tabs[2]:
-    st.subheader("참고치 계산 · 병원 자료 수령 후 구현")
-    st.write("아래 세 항목은 메뉴를 미리 준비했습니다. 현재는 백분위나 정상·이상 판정을 계산하지 않습니다.")
-    for title, desc in [
-        ("Kidney length", "임신 주수별 P5 / P50 / P95"),
-        ("EFW percentile", "임신 주수별 체중 백분위"),
-        ("AFI percentile", "임신 주수별 P5 / P50 / P95"),
-    ]:
-        with st.container(border=True):
-            st.markdown(f"**{title}**")
-            st.caption(f"{desc} · 병원 참고표 및 출처 확인 후 활성화 예정")
-    st.warning("참고문헌마다 기준 집단·주수 범위·단위·백분위 계산법이 달라 임의 수치를 넣지 않았습니다.")
+with refs:
+    st.subheader('임신 주수별 참고치')
+    st.caption('참고치 수치 데이터는 공개 저장소에 포함하지 않았습니다. 입력 UI만 제공하며 percentile 판정은 수행하지 않습니다.')
+    with st.container(border=True):
+        st.markdown('**EFW (g)**')
+        group=st.selectbox('임신 형태',('Singleton','DC twin','MC twin'),key='efw_group')
+        efw=number('EFW','efw','g')
+        if efw is not None: reports.append(f'EFW ({group}): {efw:g} g ({ga}); percentile reference pending')
+        st.info('EFW percentile: 참고치 미탑재')
+    with st.container(border=True):
+        st.markdown('**Kidney length (mm)**')
+        kidney=number('Kidney length','kidney')
+        if kidney is not None: reports.append(f'Kidney length: {kidney:g} mm ({ga}); reference pending')
+        st.caption(f'Ref. {weeks}wks 5th or 95th percentile: 참고치 미탑재')
+    with st.container(border=True):
+        st.markdown('**AFI (mm)**')
+        afi=number('AFI','afi')
+        if afi is not None: reports.append(f'AFI: {afi:g} mm ({ga}); reference pending')
+        st.info('AFI percentile: 참고치 미탑재')
+    with st.container(border=True):
+        st.markdown('**Thymic diameter (mm)**')
+        thymus=number('Thymic diameter','thymus')
+        if thymus is not None: reports.append(f'Thymic diameter: {thymus:g} mm ({ga}); reference pending')
+        st.caption(f'Ref. {weeks}wks lower limit of 95% reference range: 참고치 미탑재')
+        st.caption('참고: 95% reference range의 하한은 5th percentile과 동일하지 않을 수 있습니다.')
 
 st.divider()
-st.subheader("ViewPoint 기록용 결과")
-if lines:
-    report = "\n".join(lines)
-    st.code(report, language=None)
-    st.caption("위 텍스트 오른쪽 복사 아이콘을 눌러 복사할 수 있습니다. 미입력 항목은 결과에 포함되지 않습니다.")
-    st.download_button("TXT 파일 저장", data=report.encode("utf-8"), file_name="fetal_quick_results.txt", mime="text/plain")
+st.subheader('ViewPoint 복사용 결과')
+if reports:
+    st.code('\n'.join(reports),language=None)
+    st.download_button('TXT 파일 저장',data='\n'.join(reports).encode('utf-8'),file_name='fetal_quick_results.txt',mime='text/plain')
 else:
-    st.caption("측정값을 입력하면 계산 결과가 이곳에 자동으로 정리됩니다.")
+    st.caption('측정값을 입력하면 계산 결과가 여기에 나타납니다.')
