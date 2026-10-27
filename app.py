@@ -744,7 +744,7 @@ with face:
             extra_source('EAR_LENGTH')
 
 with refs:
-    st.subheader('태아성장 · 양수 · 도플러')
+    st.subheader('태아성장 · 양수')
     st.caption('임신 주수(Weeks, Days)를 입력하면 해당 주수의 참고치를 조회합니다. 주+일은 인접 주수 간 선형보간한 값입니다.')
     with st.container(border=True):
         st.markdown('**EFW (g)**')
