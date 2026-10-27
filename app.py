@@ -304,6 +304,59 @@ EXTRA_SOURCES = {
 }
 
 
+
+# Doppler reference points transcribed from the user-provided reference photographs.
+# UA tuple: RI P5, S/D P5, RI P50, S/D P50, RI P95, S/D P95.
+# MCA table: P50 PSV (cm/s), GA 15–40 weeks. The photo's 19-week 1.3-MoM
+# entry appears truncated, so only the unaffected P50 values are used.
+UMB_DOPPLER = {16: (0.7, 3.39, 0.8, 5.12, 0.9, 10.5), 17: (0.69, 3.27, 0.79, 4.86, 0.89, 9.46), 18: (0.68, 3.16, 0.78, 4.63, 0.88, 8.61), 19: (0.67, 3.06, 0.77, 4.41, 0.87, 7.9), 20: (0.67, 2.97, 0.76, 4.22, 0.86, 7.3), 21: (0.65, 2.88, 0.75, 4.04, 0.85, 6.78), 22: (0.64, 2.79, 0.74, 3.88, 0.84, 6.3), 23: (0.63, 2.71, 0.73, 3.73, 0.83, 5.94), 24: (0.62, 2.64, 0.72, 3.59, 0.82, 5.59), 25: (0.61, 2.57, 0.71, 3.46, 0.81, 5.28), 26: (0.6, 2.5, 0.7, 3.34, 0.8, 5.01), 27: (0.59, 2.44, 0.69, 3.22, 0.79, 4.76), 28: (0.58, 2.38, 0.68, 3.12, 0.78, 4.53), 29: (0.57, 2.32, 0.67, 3.02, 0.77, 4.33), 30: (0.56, 2.26, 0.67, 2.93, 0.76, 4.14), 31: (0.55, 2.21, 0.65, 2.84, 0.75, 3.97), 32: (0.54, 2.16, 0.64, 2.76, 0.74, 3.81), 33: (0.53, 2.11, 0.63, 2.68, 0.73, 3.67), 34: (0.52, 2.07, 0.62, 2.61, 0.72, 3.53), 35: (0.51, 2.03, 0.61, 2.54, 0.71, 3.4), 36: (0.5, 1.98, 0.6, 2.47, 0.7, 3.29), 37: (0.49, 1.94, 0.59, 2.41, 0.69, 3.18), 38: (0.47, 1.9, 0.57, 2.35, 0.67, 3.08), 39: (0.46, 1.87, 0.56, 2.3, 0.67, 2.98), 40: (0.45, 1.83, 0.55, 2.24, 0.65, 2.89), 41: (0.44, 1.8, 0.54, 2.19, 0.64, 2.81), 42: (0.43, 1.76, 0.53, 2.14, 0.63, 2.73)}
+MCA_PSV_MEDIAN = {15: [20], 16: [21], 17: [22], 18: [23], 19: [24], 20: [25], 21: [26], 22: [28], 23: [29], 24: [30], 25: [32], 26: [33], 27: [35], 28: [37], 29: [38], 30: [40], 31: [42], 32: [44], 33: [46], 34: [48], 35: [50], 36: [53], 37: [55], 38: [58], 39: [61], 40: [63]}
+
+def estimated_ua_percentile(value, p5, p50, p95):
+    # Piecewise interpolation within tabulated percentile anchors only.
+    if value < p5: return '<5th'
+    if value == p5: return '5th'
+    if value < p50: return f'est. {5 + 45*(value-p5)/(p50-p5):.0f}th'
+    if value == p50: return '50th'
+    if value < p95: return f'est. {50 + 45*(value-p50)/(p95-p50):.0f}th'
+    if value == p95: return '95th'
+    return '>95th'
+
+def mca_mom_band(mom):
+    for lo,hi in [(1.0,1.3),(1.3,1.5),(1.5,1.7),(1.7,2.0)]:
+        if lo <= mom < hi: return f'{lo:.1f}–{hi:.1f} MoM'
+    return '<1.0 MoM' if mom < 1.0 else '≥2.0 MoM'
+
+def expected_lhr(method, model, ga, lesion_side):
+    # Expected LHR equations published by Perinatology.com; GA in decimal weeks.
+    # No unsupported model/side combinations are extrapolated.
+    if lesion_side == 'Left CDH':
+        coeffs = {
+          ('Longest','Jani'):(-3.4802,.3995,-.0048),
+          ('Longest','Dekoninck'):(-3.480,.399,-.004),
+          ('Trace','Jani'):(-2.3271,.27,-.0032),
+          ('Trace','Dekoninck'):(-2.356,.272,-.003),
+          ('Trace','Peralta'):(-2.2481,.2712,-.0033),
+        }
+    else:
+        coeffs = {
+          ('Longest','Jani'):(-2.5957,.3043,-.0042),
+          ('Trace','Jani'):(-1.4994,.1778,-.0021),
+          ('Trace','Peralta'):(-1.4815,.1824,-.0023),
+        }
+    coeff=coeffs.get((method,model))
+    if coeff is None: return None
+    a,b,c=coeff
+    val=a+b*ga+c*ga*ga
+    return val if val>0 else None
+
+def oe_lhr(lung_area_cm2, hc_cm, ga, side, method, model):
+    expected=expected_lhr(method,model,ga,side)
+    if expected is None: return None
+    # Published LHR = area in mm² / HC in mm; cm inputs are converted.
+    observed=lung_area_cm2*10/hc_cm
+    return observed/expected*100
+
 # ===== Streamlit application =====
 import math
 import streamlit as st
@@ -315,14 +368,14 @@ INPUT_KEYS = ('rv','lv','ra','la','plas_dist','dao',
               'g_ra','g_arv','g_frv','g_la','g_lv','card_circ','thor_circ','card_area','thor_area','fl','foot_rt','foot_lt','ac','tc',
               'kidney_rt','kidney_lt','efw','efw_a','efw_b','afi','thymus',
               'descending_colon','rectum','small_bowel','colon','stomach',
-              'nasal_bone','ear_rt','ear_lt')
+              'nasal_bone','ear_rt','ear_lt','cdh_hc','cdh_lung1','cdh_lung2','cdh_trace','cdh_total_longest','cdh_total_trace','ua_sd','ua_ri','mca_psv')
 
 def reset_inputs():
     for key in INPUT_KEYS:
         st.session_state[key] = ''
     # 임신 주수 및 EFW 유형은 유지하고 측정값만 초기화합니다.
 
-def number(label, key, unit='mm'):
+def number(label, key, unit='cm'):
     raw = st.text_input(f'{label} ({unit})', key=key, placeholder='측정값 입력')
     if not raw.strip():
         return None
@@ -346,7 +399,7 @@ def show_ratio(name, a, b, show_percent=False):
 c1,c2=st.columns([5,1.5],vertical_alignment='bottom')
 with c1:
     st.title('Fetal Quick Calculator')
-    st.caption('심장 · 근골격계 · 소화·비뇨기계 · 얼굴 계측 · 성장·양수')
+    st.caption('심장 · 근골격계 · 소화·비뇨기계 · 얼굴 계측 · 성장·양수 · Doppler')
 with c2:
     st.button('↺ 전체 수치 리셋',on_click=reset_inputs,use_container_width=True)
 
@@ -441,27 +494,27 @@ with heart:
     st.divider()
     st.subheader('Thymus 참고치')
     with st.container(border=True):
-        st.markdown('**Thymic diameter (mm)**')
+        st.markdown('**Thymic diameter (cm)**')
         thymus=number('Thymic diameter','thymus')
         row=get_ref(THYMUS_CM)
         if row is None:
             st.caption('참고치 범위: 19–38주 (마지막 주는 0일)')
         else:
-            mean,lower,upper=[v*10 for v in row]
+            mean,lower,upper=row
             if thymus is not None:
                 status=('Below lower limit' if thymus < lower else 'Above upper limit' if thymus > upper else 'Within range')
                 st.metric('95% reference range',status)
-            text=f'Ref. {ga_ref} lower limit of 95% reference range: {lower:.1f} mm'
+            text=f'Ref. {ga_ref} lower limit of 95% reference range: {lower:.2f} cm'
             if thymus is not None:
-                st.code(f'Thymic diameter: {thymus:g} mm ({text})',language=None)
+                st.code(f'Thymic diameter: {thymus:g} cm ({text})',language=None)
             else:
                 st.caption(text)
-            st.caption(f'Mean: {mean:.1f} mm | Upper limit: {upper:.1f} mm')
+            st.caption(f'Mean: {mean:.2f} cm | Upper limit: {upper:.2f} cm')
             ref_caption('THYMUS_CM')
 
 with musculo:
     st.subheader('근골격계·흉곽')
-    st.caption('길이·둘레는 mm 단위로 입력합니다.')
+    st.caption('길이·둘레는 cm 단위로 입력합니다.')
 
     st.markdown('**FL / Foot length**')
     fl=number('FL','fl')
@@ -487,16 +540,16 @@ with musculo:
     if foot_row is None:
         st.caption('Foot length 참고치: 15–37주 (마지막 주는 0일). 임신 주수를 입력해 주세요.')
     else:
-        foot_p5_mm=foot_row[0]*10  # published table is in cm
+        foot_p5_cm=foot_row[0]  # published table is in cm
         if foot_values:
             rt_text=f'{foot_rt:g}' if foot_rt is not None else '—'
             lt_text=f'{foot_lt:g}' if foot_lt is not None else '—'
-            foot_text=(f'Foot length: Rt {rt_text} mm, Lt {lt_text} mm '
-                       f'(Ref. {ga_ref} 5th percentile: {foot_p5_mm:.1f} mm)')
+            foot_text=(f'Foot length: Rt {rt_text} cm, Lt {lt_text} cm '
+                       f'(Ref. {ga_ref} 5th percentile: {foot_p5_cm:.2f} cm)')
             st.markdown('**기록용 결과 — Foot length**')
             st.code(foot_text,language=None)
         else:
-            st.caption(f'Ref. {ga_ref} 5th percentile: {foot_p5_mm:.1f} mm')
+            st.caption(f'Ref. {ga_ref} 5th percentile: {foot_p5_cm:.2f} cm')
         ref_caption('FOOT_CM')
 
     st.divider()
@@ -515,6 +568,52 @@ with musculo:
         st.caption('TC와 AC를 입력하면 바로 아래에 결과가 표시됩니다.')
 
 
+    st.divider()
+    st.subheader('CDH · LHR / O/E LHR')
+    st.caption('HC 및 두 폐 직경: cm · Tracing lung area: cm². 병변 반대쪽 폐를 측정합니다.')
+    c1,c2=st.columns(2)
+    with c1: cdh_side=st.selectbox('CDH side',('Left CDH','Right CDH'),key='cdh_side')
+    with c2: cdh_hc=number('HC','cdh_hc')
+    c1,c2,c3=st.columns(3)
+    with c1: cdh_lung1=number('Lung longest diameter','cdh_lung1')
+    with c2: cdh_lung2=number('Perpendicular diameter','cdh_lung2')
+    with c3: cdh_trace=number('Tracing lung area','cdh_trace','cm²')
+    st.caption('TOTALtrial 값은 공식 계산기의 결과를 직접 입력합니다. 공식 사이트의 계산 방식은 아직 독립적으로 검증되지 않아 임의 계산값을 표시하지 않습니다.')
+    st.markdown('[TOTALtrial 계산기 열기](https://www.totaltrial.eu/?id=6) · [Jani / Dekoninck 공식 확인](https://perinatology.com/calculators/LHR.htm)')
+    t1,t2=st.columns(2)
+    with t1: cdh_total_longest=number('TOTALtrial Longest O/E LHR','cdh_total_longest','%')
+    with t2: cdh_total_trace=number('TOTALtrial Trace O/E LHR','cdh_total_trace','%')
+
+    def format_oe_line(method, area, total_trial_value):
+        if area is None or cdh_hc is None or weeks is None or days is None:
+            return None
+        ga_value=weeks+days/7
+        values=[]
+        for model in ('Jani','Dekoninck'):
+            result=oe_lhr(area,cdh_hc,ga_value,cdh_side,method,model)
+            values.append(f'{result:.1f}% ({model})' if result is not None else f'— ({model}: 공식 없음)')
+        values.append(f'{total_trial_value:.1f}% (Total trial)' if total_trial_value is not None else '— (Total trial: 값 입력 필요)')
+        return f'{method} : '+', '.join(values)
+
+    longest_area=cdh_lung1*cdh_lung2 if cdh_lung1 is not None and cdh_lung2 is not None else None
+    if weeks is None or days is None:
+        st.caption('O/E LHR를 계산하려면 상단의 임신 주수를 입력해 주세요.')
+    elif cdh_hc is None:
+        st.caption('HC를 입력하면 결과가 표시됩니다.')
+    else:
+        longest_line=format_oe_line('Longest',longest_area,cdh_total_longest)
+        trace_line=format_oe_line('Trace',cdh_trace,cdh_total_trace)
+        if longest_line is not None or trace_line is not None:
+            st.markdown('**O/E LHR**')
+            if longest_line is not None: st.code(longest_line,language=None)
+            if trace_line is not None: st.code(trace_line,language=None)
+            combined='O/E LHR\n'+'\n'.join(x for x in (longest_line,trace_line) if x is not None)
+            st.text_area('O/E LHR 전체 복사',value=combined,height=110)
+        if cdh_side=='Right CDH':
+            st.caption('Right CDH에 대한 Dekoninck 공식은 Perinatology에 제시되어 있지 않습니다.')
+    st.caption('Jani / Dekoninck: Perinatology 공식 · Total trial: TOTALtrial 사이트 입력값')
+
+
 
 def extra_source(name):
     st.caption('Ref. ' + EXTRA_SOURCES[name])
@@ -524,7 +623,7 @@ def reference_line(title, value, reference_text, label=None):
     if value is None:
         st.caption(reference_text)
         return
-    line=f'{title}: {value:g} mm ({reference_text})'
+    line=f'{title}: {value:g} cm ({reference_text})'
     st.code(line,language=None)
 
 def pair_reference_line(title, right, left, reference_text):
@@ -533,12 +632,12 @@ def pair_reference_line(title, right, left, reference_text):
         return
     r=f'{right:g}' if right is not None else '—'
     l=f'{left:g}' if left is not None else '—'
-    line=f'{title}: Rt {r} mm, Lt {l} mm ({reference_text})'
+    line=f'{title}: Rt {r} cm, Lt {l} cm ({reference_text})'
     st.code(line,language=None)
 
 with digestive:
     st.subheader('소화기계 계측')
-    st.caption('단위: mm. 95% CI는 평균에 대한 신뢰구간이며 개별 태아의 정상범위가 아닙니다.')
+    st.caption('단위: cm. 95% CI는 평균에 대한 신뢰구간이며 개별 태아의 정상범위가 아닙니다.')
     with st.container(border=True):
         st.markdown('**Stomach**')
         stomach=number('Stomach','stomach')
@@ -546,7 +645,7 @@ with digestive:
         if row is None:
             st.caption('참고치 범위: 14–40주. 임신 주수를 입력해 주세요.')
         else:
-            reference_line('Stomach',stomach,f'Ref. {ga_ref} 5th percentile: {row[2]:.1f} mm; 95th percentile: {row[8]:.1f} mm')
+            reference_line('Stomach',stomach,f'Ref. {ga_ref} 5th percentile: {row[2]/10:.2f} cm; 95th percentile: {row[8]/10:.2f} cm')
             extra_source('STOMACH')
     with st.container(border=True):
         st.markdown('**Small bowel diameter**')
@@ -555,8 +654,8 @@ with digestive:
         if row is None:
             st.caption('참고치 범위: 20–40주.')
         else:
-            reference_line('Small bowel diameter',small_bowel,f'Ref. {ga_ref} upper 95% prediction limit: {row[2]:.1f} mm')
-            st.caption(f'Mean: {row[0]:.1f} mm | 95% prediction interval: {row[1]:.1f}–{row[2]:.1f} mm')
+            reference_line('Small bowel diameter',small_bowel,f'Ref. {ga_ref} upper 95% prediction limit: {row[2]/10:.2f} cm')
+            st.caption(f'Mean: {row[0]/10:.2f} cm | 95% prediction interval: {row[1]/10:.2f}–{row[2]/10:.2f} cm')
             extra_source('SMALL_BOWEL_COLON')
     with st.container(border=True):
         st.markdown('**Colon diameter**')
@@ -568,11 +667,11 @@ with digestive:
             if row[5] is None:
                 st.caption(f'{ga_ref}: 원표의 20주 colon 95% prediction interval 값이 평균과 모순되어 참고치 출력을 보류했습니다.')
                 if colon is not None:
-                    text=f'Colon diameter: {colon:g} mm (Ref. {ga_ref} mean: {row[3]:.1f} mm; prediction limit pending verification)'
+                    text=f'Colon diameter: {colon:g} cm (Ref. {ga_ref} mean: {row[3]/10:.2f} cm; prediction limit pending verification)'
                     st.code(text,language=None)
             else:
-                reference_line('Colon diameter',colon,f'Ref. {ga_ref} upper 95% prediction limit: {row[5]:.1f} mm')
-                st.caption(f'Mean: {row[3]:.1f} mm | 95% prediction interval: {row[4]:.1f}–{row[5]:.1f} mm')
+                reference_line('Colon diameter',colon,f'Ref. {ga_ref} upper 95% prediction limit: {row[5]/10:.2f} cm')
+                st.caption(f'Mean: {row[3]/10:.2f} cm | 95% prediction interval: {row[4]/10:.2f}–{row[5]/10:.2f} cm')
             extra_source('SMALL_BOWEL_COLON')
     with st.container(border=True):
         st.markdown('**Descending colon diameter**')
@@ -581,7 +680,7 @@ with digestive:
         if row is None:
             st.caption('참고치 범위: 19–40주.')
         else:
-            reference_line('Descending colon diameter',descending_colon,f'Ref. {ga_ref} mean: {row[0]:.2f} mm; 95% CI: {row[1]:.2f}–{row[2]:.2f} mm')
+            reference_line('Descending colon diameter',descending_colon,f'Ref. {ga_ref} mean: {row[0]/10:.2f} cm; 95% CI: {row[1]/10:.2f}–{row[2]/10:.2f} cm')
             extra_source('DESCENDING_RECTUM')
     with st.container(border=True):
         st.markdown('**Rectal diameter**')
@@ -592,17 +691,17 @@ with digestive:
         elif row[4] is None:
             st.caption('40주 rectal 95% CI 하한은 원표의 오기 가능성이 있어 표시하지 않습니다.')
             if rectum is not None:
-                text=f'Rectal diameter: {rectum:g} mm (Ref. {ga_ref} mean: {row[3]:.2f} mm; CI pending verification)'
+                text=f'Rectal diameter: {rectum:g} cm (Ref. {ga_ref} mean: {row[3]/10:.2f} cm; CI pending verification)'
                 st.code(text,language=None)
         else:
-            reference_line('Rectal diameter',rectum,f'Ref. {ga_ref} mean: {row[3]:.2f} mm; 95% CI: {row[4]:.2f}–{row[5]:.2f} mm')
+            reference_line('Rectal diameter',rectum,f'Ref. {ga_ref} mean: {row[3]/10:.2f} cm; 95% CI: {row[4]/10:.2f}–{row[5]/10:.2f} cm')
         if row is not None:
             extra_source('DESCENDING_RECTUM')
 
     st.divider()
     st.subheader('비뇨기계 계측')
     with st.container(border=True):
-        st.markdown('**Kidney length (mm)**')
+        st.markdown('**Kidney length (cm)**')
         c1,c2=st.columns(2)
         with c1: kidney_rt=number('Kidney Rt','kidney_rt')
         with c2: kidney_lt=number('Kidney Lt','kidney_lt')
@@ -610,10 +709,10 @@ with digestive:
         if row is None:
             st.caption('참고치 범위: 16–41주 (마지막 주는 0일)')
         else:
-            p5,p50,p95=row
-            reference_text=f'Ref. {ga_ref} 5th percentile: {p5:.1f} mm; 95th percentile: {p95:.1f} mm'
+            p5,p50,p95=[x/10 for x in row]
+            reference_text=f'Ref. {ga_ref} 5th percentile: {p5:.2f} cm; 95th percentile: {p95:.2f} cm'
             pair_reference_line('Kidney length',kidney_rt,kidney_lt,reference_text)
-            st.caption(f'P50: {p50:.1f} mm')
+            st.caption(f'P50: {p50:.2f} cm')
             ref_caption('KIDNEY_MM')
 
 with face:
@@ -625,7 +724,7 @@ with face:
         if row is None:
             st.caption('참고치 범위: 11–40주.')
         else:
-            reference_line('NB',nasal_bone,f'Ref. {ga_ref} 5th percentile: {row[1]:.1f} mm')
+            reference_line('NB',nasal_bone,f'Ref. {ga_ref} 5th percentile: {row[1]/10:.2f} cm')
             extra_source('NASAL_BONE')
     with st.container(border=True):
         st.markdown('**Ear length**')
@@ -636,7 +735,7 @@ with face:
         if row is None:
             st.caption('참고치 범위: 15–40주.')
         else:
-            pair_reference_line('Ear length',ear_rt,ear_lt,f'Ref. {ga_ref} 5th percentile: {row[0]:.1f} mm')
+            pair_reference_line('Ear length',ear_rt,ear_lt,f'Ref. {ga_ref} 5th percentile: {row[0]/10:.2f} cm')
             extra_source('EAR_LENGTH')
 
 with refs:
@@ -696,19 +795,52 @@ with refs:
             if not group.startswith('Singleton'):
                 st.caption('DC/MC 자료는 초음파 추정체중 성장곡선이 아닌 쌍태아 출생체중 참고표입니다.')
     with st.container(border=True):
-        st.markdown('**AFI (mm)**')
+        st.markdown('**AFI (cm)**')
         afi=number('AFI','afi')
         row=get_ref(AFI)
         if row is None:
             st.caption('참고치 범위: 16–42주 (마지막 주는 0일)')
         else:
-            show_band('AFI percentile interval',afi,row,[3,5,50,95,97],'mm')
+            show_band('AFI percentile interval',afi,[x/10 for x in row],[3,5,50,95,97],'cm')
             if afi is not None:
-                nearest=nearest_reference_percentile(afi,[3,5,50,95,97],row)
+                nearest=nearest_reference_percentile(afi,[3,5,50,95,97],[x/10 for x in row])
                 if nearest is not None:
                     pct,ref_mm=nearest
-                    st.code(f'AFI: {afi:g} mm (Ref. {ga_ref} {pct}th percentile: {ref_mm:.1f} mm)',language=None)
+                    st.code(f'AFI: {afi:g} cm (Ref. {ga_ref} {pct}th percentile: {ref_mm:.2f} cm)',language=None)
                 else:
-                    st.code(f'AFI: {afi:g} mm (Ref. unavailable)',language=None)
-            st.caption(' | '.join(f'P{pct}: {val:.1f} mm' for pct,val in zip([3,5,50,95,97],row)))
+                    st.code(f'AFI: {afi:g} cm (Ref. unavailable)',language=None)
+            st.caption(' | '.join(f'P{pct}: {val/10:.2f} cm' for pct,val in zip([3,5,50,95,97],row)))
             ref_caption('AFI')
+
+    st.divider()
+    st.subheader('Umbilical artery · MCA Doppler')
+    with st.container(border=True):
+        st.markdown('**Umbilical artery Doppler**')
+        c1,c2=st.columns(2)
+        with c1: ua_sd=number('Umbilical artery S/D ratio','ua_sd','ratio')
+        with c2: ua_ri=number('Umbilical artery RI','ua_ri','index')
+        ua_row=get_ref(UMB_DOPPLER)
+        if ua_row is None:
+            st.caption('Umbilical artery 참고치: 16–42주. 임신 주수를 입력해 주세요.')
+        else:
+            if ua_sd is not None:
+                sd_pct=estimated_ua_percentile(ua_sd,ua_row[1],ua_row[3],ua_row[5])
+                prefix='Elevated umbilical artery S/D ratio' if ua_sd>ua_row[5] else 'Umbilical artery S/D ratio'
+                st.code(f'{prefix}: {ua_sd:.2f} ({sd_pct} percentile)',language=None)
+                st.caption(f'Ref. {ga_ref} S/D P5 {ua_row[1]:.2f} · P50 {ua_row[3]:.2f} · P95 {ua_row[5]:.2f}')
+            if ua_ri is not None:
+                ri_pct=estimated_ua_percentile(ua_ri,ua_row[0],ua_row[2],ua_row[4])
+                st.code(f'Umbilical artery RI: {ua_ri:.2f} ({ri_pct} percentile)',language=None)
+                st.caption(f'Ref. {ga_ref} RI P5 {ua_row[0]:.2f} · P50 {ua_row[2]:.2f} · P95 {ua_row[4]:.2f}')
+            st.caption('P5–P50–P95 사이 percentile은 선형 추정치이며, 실제 분포 기반 정밀 백분위수가 아닙니다.')
+    with st.container(border=True):
+        st.markdown('**MCA Doppler**')
+        mca_psv=number('MCA PSV','mca_psv','cm/s')
+        mca_row=get_ref(MCA_PSV_MEDIAN)
+        if mca_row is None:
+            st.caption('MCA PSV 참고치: 15–40주. 임신 주수를 입력해 주세요.')
+        elif mca_psv is not None:
+            mca_mom=mca_psv/mca_row[0]
+            st.code(f'MCA PSV: {mca_psv:.1f} cm/s ({mca_mom:.2f} MoM; {mca_mom_band(mca_mom)})',language=None)
+            st.caption(f'Ref. {ga_ref} median: {mca_row[0]:.1f} cm/s · 1.5 MoM: {mca_row[0]*1.5:.1f} cm/s')
+    st.caption('Doppler 참고치: 사용자가 제공한 Umbilical artery RI/S-D 및 MCA PSV 표 (출처 표기: 2000).')
