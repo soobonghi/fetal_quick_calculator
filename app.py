@@ -368,7 +368,7 @@ INPUT_KEYS = ('rv','lv','ra','la','plas_dist','dao',
               'g_ra','g_arv','g_frv','g_la','g_lv','card_circ','thor_circ','card_area','thor_area','fl','foot_rt','foot_lt','ac','tc',
               'kidney_rt','kidney_lt','efw','efw_a','efw_b','afi','thymus',
               'descending_colon','rectum','small_bowel','colon','stomach',
-              'nasal_bone','ear_rt','ear_lt','cdh_hc','cdh_lung1','cdh_lung2','cdh_trace','cdh_total_longest','cdh_total_trace','ua_sd','ua_ri','mca_psv')
+              'nasal_bone','ear_rt','ear_lt','cdh_hc','cdh_lung1','cdh_lung2','cdh_trace','cdh_total_longest','ua_sd','ua_ri','mca_psv')
 
 def reset_inputs():
     for key in INPUT_KEYS:
@@ -514,7 +514,6 @@ with heart:
 
 with cdh:
     st.subheader('CDH · LHR / O/E LHR')
-    st.caption('HC 및 두 폐 직경: cm · Tracing lung area: cm². 병변 반대쪽 폐를 측정합니다.')
     c1,c2=st.columns(2)
     with c1: cdh_side=st.selectbox('CDH side',('Left CDH','Right CDH'),key='cdh_side')
     with c2: cdh_hc=number('HC','cdh_hc')
@@ -522,11 +521,11 @@ with cdh:
     with c1: cdh_lung1=number('Lung longest diameter','cdh_lung1')
     with c2: cdh_lung2=number('Perpendicular diameter','cdh_lung2')
     with c3: cdh_trace=number('Tracing lung area','cdh_trace','cm²')
-    st.info('Total trial은 현재 자동 계산되지 않습니다. 공식 TOTALtrial 사이트에서 Longest와 Trace 결과를 확인한 뒤 아래 칸에 입력해 주세요. 공식 계산식이 검증되면 자동 계산으로 전환할 수 있습니다.')
+    st.caption('Total trial 표기: Trace는 Peralta 참고식으로 자동 계산합니다. Longest는 Peralta의 해당 측정법 공식이 없어 TOTALtrial 사이트 결과를 직접 입력합니다.')
     st.markdown('[TOTALtrial 계산기 열기](https://www.totaltrial.eu/?id=6) · [Jani / Dekoninck 공식 확인](https://perinatology.com/calculators/LHR.htm)')
     t1,t2=st.columns(2)
     with t1: cdh_total_longest=number('TOTALtrial Longest O/E LHR','cdh_total_longest','%')
-    with t2: cdh_total_trace=number('TOTALtrial Trace O/E LHR','cdh_total_trace','%')
+    # Trace Peralta is computed automatically; no manual field required.
 
     def format_oe_line(method, area, total_trial_value):
         if area is None or cdh_hc is None or weeks is None or days is None:
@@ -536,7 +535,11 @@ with cdh:
         for model in ('Jani','Dekoninck'):
             result=oe_lhr(area,cdh_hc,ga_value,cdh_side,method,model)
             values.append(f'{result:.1f}% ({model})' if result is not None else f'— ({model}: 공식 없음)')
-        values.append(f'{total_trial_value:.1f}% (Total trial)' if total_trial_value is not None else '— (Total trial: 값 입력 필요)')
+        if method == 'Trace':
+            peralta=oe_lhr(area,cdh_hc,ga_value,cdh_side,'Trace','Peralta')
+            values.append(f'{peralta:.1f}% (Total trial)' if peralta is not None else '— (Total trial: 참고식 없음)')
+        else:
+            values.append(f'{total_trial_value:.1f}% (Total trial)' if total_trial_value is not None else '— (Total trial: 공식 사이트 값 입력 필요)')
         return f'{method} : '+', '.join(values)
 
     longest_area=cdh_lung1*cdh_lung2 if cdh_lung1 is not None and cdh_lung2 is not None else None
@@ -546,7 +549,7 @@ with cdh:
         st.caption('HC를 입력하면 결과가 표시됩니다.')
     else:
         longest_line=format_oe_line('Longest',longest_area,cdh_total_longest)
-        trace_line=format_oe_line('Trace',cdh_trace,cdh_total_trace)
+        trace_line=format_oe_line('Trace',cdh_trace,None)
         if longest_line is not None or trace_line is not None:
             st.markdown('**O/E LHR**')
             if longest_line is not None: st.code(longest_line,language=None)
@@ -555,7 +558,7 @@ with cdh:
             st.text_area('O/E LHR 전체 복사',value=combined,height=110)
         if cdh_side=='Right CDH':
             st.caption('Right CDH에 대한 Dekoninck 공식은 Perinatology에 제시되어 있지 않습니다.')
-    st.caption('Jani / Dekoninck: Perinatology 공식 · Total trial: TOTALtrial 사이트 입력값')
+    st.caption('Jani / Dekoninck: Perinatology · Total trial(Trace): Peralta 참고식 기반 대체값 (TOTALtrial 사이트와 동일하다고 검증되지 않음) · Total trial(Longest): 공식 사이트 입력값')
 
 
 
@@ -573,7 +576,7 @@ with musculo:
 
     if fl is not None and foot_for_ratio is not None:
         fl_foot_value=ratio(fl,foot_for_ratio)
-        fl_foot_text=f'FL/Foot: {fl_foot_value:.2f} (Abnormal cutoff: <0.90)'
+        fl_foot_text=f'FL/Foot ratio: {fl_foot_value:.2f} (<1 suggests skeletal dysplasia)'
         st.code(fl_foot_text,language=None)
         if len(foot_values)==2:
             st.caption('FL/Foot 비율은 Rt·Lt foot length의 평균으로 계산했습니다.')
@@ -603,14 +606,14 @@ with musculo:
     st.markdown('**FL/AC**')
     ac=number('AC','ac')
     if fl is not None and ac is not None:
-        st.code(f'FL/AC: {ratio(fl,ac):.2f} (Abnormal cutoff: <0.16)',language=None)
+        st.code(f'FL/AC: {ratio(fl,ac):.2f} (<0.16 suggests lethality)',language=None)
     else:
         st.caption('FL과 AC를 입력하면 바로 아래에 결과가 표시됩니다.')
     st.divider()
     st.markdown('**TC/AC**')
     tc=number('Thoracic circumference','tc')
     if tc is not None and ac is not None:
-        st.code(f'TC/AC: {ratio(tc,ac):.2f} (Abnormal cutoff: <0.60)',language=None)
+        st.code(f'TC/AC: {ratio(tc,ac):.2f} (<0.8 suggests lethality)',language=None)
     else:
         st.caption('TC와 AC를 입력하면 바로 아래에 결과가 표시됩니다.')
 
